@@ -1,0 +1,16 @@
+version: "3.8"
+
+services:
+  doc-client:
+    build: .
+    container_name: doc-client
+    environment:
+      - NODE_ENV=development
+      # Add later, e.g.
+      # - NEXT_PUBLIC_GATEWAY_URL=http://your-nginx-host/files
+    ports:
+      - "3000:3000"
+    # Optional: live code editing from host
+    volumes:
+      - .:/app
+      - /app/node_modules
