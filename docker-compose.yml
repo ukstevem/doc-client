@@ -6,6 +6,9 @@ services:
     container_name: doc-client
     environment:
       - NODE_ENV=development
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+      - WATCHPACK_POLLING_INTERVAL=1000
       # Add later, e.g.
       # - NEXT_PUBLIC_GATEWAY_URL=http://your-nginx-host/files
     ports:
