@@ -1,17 +1,8 @@
 // next.config.ts
 
-import type { NextConfig } from 'next';
+// Minimal config – no webpackDevMiddleware, no special options.
+// This avoids the "Invalid next.config" warnings.
 
-const nextConfig: NextConfig = {
-  // Force webpack dev middleware to use polling.
-  // This helps hot reload work reliably inside Docker volumes.
-  webpackDevMiddleware: (config) => {
-    config.watchOptions = {
-      poll: 1000,          // check for changes every 1s
-      aggregateTimeout: 300,
-    };
-    return config;
-  },
-};
+const nextConfig = {};
 
 export default nextConfig;

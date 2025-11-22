@@ -1,19 +1,29 @@
-version: "3.8"
-
 services:
   doc-client:
     build: .
     container_name: doc-client
+    restart: unless-stopped
+    working_dir: /app
     environment:
-      - NODE_ENV=development
-      - CHOKIDAR_USEPOLLING=true
-      - WATCHPACK_POLLING=true
-      - WATCHPACK_POLLING_INTERVAL=1000
-      # Add later, e.g.
-      # - NEXT_PUBLIC_GATEWAY_URL=http://your-nginx-host/files
+      NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+      WATCHPACK_POLLING_INTERVAL: "1000"
+
+      # Supabase (taken from .env on the Pi)
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+
+      # Inside container: NAS root is always here
+      DOC_NAS_ROOT: /data/cad_iot
     ports:
       - "3000:3000"
-    # Optional: live code editing from host
     volumes:
+      # App source + node_modules
       - .:/app
       - /app/node_modules
+
+      # NAS root on the Pi host → /data/cad_iot in the container
+      # On the Pi, you mount //pss-dc02/cad_iot to /mnt/cad_iot
+      - /mnt/cad_iot:/data/cad_iot
