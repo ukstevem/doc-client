@@ -17,6 +17,10 @@ services:
 
       # Inside container: NAS root is always here
       DOC_NAS_ROOT: /data/cad_iot
+
+      # Filseserver gateway
+      NEXT_PUBLIC_DOC_GATEWAY_BASE_URL: "http://localhost:80/files"
+
     ports:
       - "3000:3000"
     volumes:

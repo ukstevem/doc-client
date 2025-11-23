@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 
 export const runtime = 'nodejs';
 
@@ -23,17 +24,7 @@ interface FileResult {
   error?: string;
 }
 
-/* --------- Small helpers (Power-of-10 style) --------- */
-
-function getStorageBucketName(): string {
-  // Logical bucket name for NAS-based storage.
-  // You can make this configurable later if you like.
-  const value = process.env.DOC_STORAGE_BUCKET;
-  if (value && value.trim()) {
-    return value.trim();
-  }
-  return 'nas';
-}
+/* --------- Small helpers --------- */
 
 function readEnv(name: string): string {
   const value = process.env[name];
@@ -80,53 +71,64 @@ function getFilesFromForm(formData: FormData): File[] {
   return files;
 }
 
-function safeSegment(value: string): string {
+function splitName(name: string): { root: string; ext: string | null } {
+  const idx = name.lastIndexOf('.');
+  if (idx <= 0 || idx === name.length - 1) {
+    // no dot, or dot at start/end → treat as no extension
+    return { root: name, ext: null };
+  }
+  return {
+    root: name.slice(0, idx),
+    ext: name.slice(idx + 1).toLowerCase(),
+  };
+}
+
+function sanitiseRootName(root: string): string {
+  const trimmed = root.trim().toLowerCase();
+  const replaced = trimmed.replace(/\s+/g, '_');
+  const cleaned = replaced.replace(/[^a-z0-9_]/g, '');
+  return cleaned || 'unnamed';
+}
+
+function safeContextValue(value: string): string {
+  // Keep it simple: trim and replace spaces with underscore.
+  // The schema expects project/enquiry numbers like "10001" or "ENQ-1234".
   const trimmed = value.trim();
   if (!trimmed) {
     return 'unassigned';
   }
-  return trimmed.replace(/[^a-zA-Z0-9_\-]/g, '_');
-}
-
-function safeFilename(name: string): string {
-  if (!name) {
-    return 'unnamed.pdf';
-  }
-  return name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._\-]/g, '_');
-}
-
-function extractFileExt(name: string): string | null {
-  const idx = name.lastIndexOf('.');
-  if (idx === -1 || idx === name.length - 1) {
-    return null;
-  }
-  return name.substring(idx + 1).toLowerCase();
+  return trimmed.replace(/\s+/g, '_');
 }
 
 /**
- * Build a NAS-relative storage_path for document_files.
- * Example (enquiry):
- *   enquiries/ENQ-1234/raw_pdfs/20251122T120000_0_File.pdf
- * Example (project):
- *   projects/10001/raw_pdfs/20251122T120000_0_File.pdf
+ * Build raw storage path and id based on the design:
+ *
+ * raw/enquiries/{enquirynumber}/{document_file_id}_{sanitised-root}.{ext}
+ * raw/projects/{projectnumber}/{document_file_id}_{sanitised-root}.{ext}
  */
-function buildStoragePath(
+function buildRawStoragePath(
   ctx: UploadContext,
-  fileName: string,
-  index: number,
-): string {
-  const nowIso = new Date().toISOString().replace(/[:.]/g, '');
-  const safeName = safeFilename(fileName);
+  originalName: string,
+): { id: string; storagePath: string } {
+  const id = randomUUID();
+  const { root, ext } = splitName(originalName || 'unnamed');
+  const safeRoot = sanitiseRootName(root);
+  const extPart = ext ? `.${ext}` : '.pdf';
 
-  const baseSegment =
+  const contextValue =
     ctx.contextType === 'project'
-      ? `projects/${safeSegment(ctx.projectNumber)}`
-      : `enquiries/${safeSegment(ctx.enquiryNumber)}`;
+      ? safeContextValue(ctx.projectNumber)
+      : safeContextValue(ctx.enquiryNumber);
 
-  // Use posix-style joins so storage_path always has forward slashes
-  const dir = path.posix.join(baseSegment, 'raw_pdfs');
-  const fileSegment = `${nowIso}_${index}_${safeName}`;
-  return path.posix.join(dir, fileSegment);
+  const dirPrefix =
+    ctx.contextType === 'project'
+      ? `raw/projects/${contextValue}`
+      : `raw/enquiries/${contextValue}`;
+
+  const filename = `${id}_${safeRoot}${extPart}`;
+  const storagePath = path.posix.join(dirPrefix, filename);
+
+  return { id, storagePath };
 }
 
 async function writeFileToNas(
@@ -145,18 +147,20 @@ async function writeFileToNas(
   await fs.writeFile(absolutePath, buffer);
 }
 
-async function insertDocumentFileRow(
+async function insertDocumentFileRowWithId(
   supabase: SupabaseClient,
   ctx: UploadContext,
+  id: string,
   filename: string,
   size: number,
   storagePath: string,
 ): Promise<string | null> {
-  const fileExt = extractFileExt(filename);
-  const storageBucket = getStorageBucketName();
+  const { ext } = splitName(filename);
 
   const insertPayload = {
-    // Business keys / linking
+    id, // explicit UUID
+
+    // Linking
     enquirynumber:
       ctx.contextType === 'enquiry' ? ctx.enquiryNumber || null : null,
     projectnumber:
@@ -168,17 +172,17 @@ async function insertDocumentFileRow(
 
     // File / storage info
     original_filename: filename,
-    file_ext: fileExt,
-    storage_bucket: storageBucket,
+    file_ext: ext,
+    storage_bucket: 'nas',
     storage_object_path: storagePath,
     file_size_bytes: size,
 
-    // Hashes – worker can fill these later
+    // Hashes (worker will fill later if needed)
     file_sha256: null,
     file_sha1: null,
 
     // Processing state
-    status: 'uploaded',     // matches schema default / worker expectations
+    status: 'uploaded',
     page_count: null,
     processing_error: null,
   };
@@ -198,13 +202,12 @@ async function handleOneFile(
   nasRoot: string,
   ctx: UploadContext,
   file: File,
-  index: number,
 ): Promise<FileResult> {
   const filename = file.name || 'unnamed';
   const size = file.size;
   const type = file.type || 'application/pdf';
 
-  const storagePath = buildStoragePath(ctx, filename, index);
+  const { id, storagePath } = buildRawStoragePath(ctx, filename);
 
   try {
     await writeFileToNas(nasRoot, storagePath, file);
@@ -220,9 +223,10 @@ async function handleOneFile(
     };
   }
 
-  const insertError = await insertDocumentFileRow(
+  const insertError = await insertDocumentFileRowWithId(
     supabase,
     ctx,
+    id,
     filename,
     size,
     storagePath,
@@ -270,13 +274,7 @@ export async function POST(request: Request) {
     const results: FileResult[] = [];
     for (let i = 0; i < files.length; i += 1) {
       const file = files[i];
-      const result = await handleOneFile(
-        supabase,
-        nasRoot,
-        ctx,
-        file,
-        i,
-      );
+      const result = await handleOneFile(supabase, nasRoot, ctx, file);
       results.push(result);
     }
 

@@ -1,5 +1,6 @@
 // app/page.tsx
-// Dashboard showing recent document_files grouped by project / enquiry.
+// Dashboard showing recent document_files grouped by project / enquiry,
+// with NAS paths rendered as optional links via doc-gateway.
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
@@ -57,7 +58,7 @@ async function fetchRecentDocuments(
         'page_count',
       ].join(','),
     )
-    .order('id', { ascending: false }) // most recent first
+    .order('id', { ascending: false })
     .limit(limit);
 
   if (error || !data) {
@@ -113,11 +114,36 @@ function formatSize(bytes: number | null): string {
   return `${rounded.toFixed(1)} kB`;
 }
 
+function getGatewayBaseUrl(): string | null {
+  const raw = process.env.NEXT_PUBLIC_DOC_GATEWAY_BASE_URL;
+  if (!raw) {
+    return null;
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+  // Remove any trailing slashes so we can safely append paths.
+  return trimmed.replace(/\/+$/, '');
+}
+
+function buildGatewayUrl(
+  baseUrl: string | null,
+  storagePath: string,
+): string | null {
+  if (!baseUrl) {
+    return null;
+  }
+  const relative = storagePath.replace(/^\/+/, '');
+  return `${baseUrl}/${relative}`;
+}
+
 /* --------- Page component --------- */
 
 export default async function HomePage() {
   const rows = await fetchRecentDocuments(50);
   const groups = groupDocuments(rows);
+  const gatewayBaseUrl = getGatewayBaseUrl();
 
   return (
     <div style={{ maxWidth: 900 }}>
@@ -141,7 +167,7 @@ export default async function HomePage() {
       >
         Recent uploads from <code>document_files</code>, grouped by project or
         enquiry. Files are stored on the NAS; the worker will update status,
-        page counts, hashes and previews as it processes each file.
+        page counts and previews as it processes each file.
       </p>
 
       {groups.length === 0 && (
@@ -236,57 +262,74 @@ export default async function HomePage() {
                 </tr>
               </thead>
               <tbody>
-                {group.rows.map((row) => (
-                  <tr key={row.id}>
-                    <td
-                      style={{
-                        padding: '0.3rem 0.4rem',
-                        borderBottom: '1px solid #f1f5f9',
-                      }}
-                    >
-                      <code>{row.original_filename}</code>
-                    </td>
-                    <td
-                      style={{
-                        padding: '0.3rem 0.4rem',
-                        borderBottom: '1px solid #f1f5f9',
-                      }}
-                    >
-                      {row.status || '-'}
-                    </td>
-                    <td
-                      style={{
-                        padding: '0.3rem 0.4rem',
-                        borderBottom: '1px solid #f1f5f9',
-                      }}
-                    >
-                      {row.page_count ?? '-'}
-                    </td>
-                    <td
-                      style={{
-                        padding: '0.3rem 0.4rem',
-                        borderBottom: '1px solid #f1f5f9',
-                      }}
-                    >
-                      {formatSize(row.file_size_bytes)}
-                    </td>
-                    <td
-                      style={{
-                        padding: '0.3rem 0.4rem',
-                        borderBottom: '1px solid #f1f5f9',
-                        maxWidth: 260,
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        fontFamily: 'monospace',
-                        fontSize: '0.8rem',
-                      }}
-                      title={row.storage_object_path}
-                    >
-                      {row.storage_object_path}
-                    </td>
-                  </tr>
-                ))}
+                {group.rows.map((row) => {
+                  const link = buildGatewayUrl(
+                    gatewayBaseUrl,
+                    row.storage_object_path,
+                  );
+
+                  return (
+                    <tr key={row.id}>
+                      <td
+                        style={{
+                          padding: '0.3rem 0.4rem',
+                          borderBottom: '1px solid #f1f5f9',
+                        }}
+                      >
+                        <code>{row.original_filename}</code>
+                      </td>
+                      <td
+                        style={{
+                          padding: '0.3rem 0.4rem',
+                          borderBottom: '1px solid #f1f5f9',
+                        }}
+                      >
+                        {row.status || '-'}
+                      </td>
+                      <td
+                        style={{
+                          padding: '0.3rem 0.4rem',
+                          borderBottom: '1px solid #f1f5f9',
+                        }}
+                      >
+                        {row.page_count ?? '-'}
+                      </td>
+                      <td
+                        style={{
+                          padding: '0.3rem 0.4rem',
+                          borderBottom: '1px solid #f1f5f9',
+                        }}
+                      >
+                        {formatSize(row.file_size_bytes)}
+                      </td>
+                      <td
+                        style={{
+                          padding: '0.3rem 0.4rem',
+                          borderBottom: '1px solid #f1f5f9',
+                          maxWidth: 260,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          fontFamily: 'monospace',
+                          fontSize: '0.8rem',
+                        }}
+                        title={row.storage_object_path}
+                      >
+                        {link ? (
+                          <a
+                            href={link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {row.storage_object_path}
+                          </a>
+                        ) : (
+                          row.storage_object_path
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
