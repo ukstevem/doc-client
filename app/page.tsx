@@ -1,11 +1,12 @@
 // app/page.tsx
 // Dashboard showing recent document_files grouped by project / enquiry,
-// with NAS paths rendered as optional links via doc-gateway.
+// with thumbnails from document_pages (page 1).
+// Clicking a thumbnail navigates to /pages/[pageId]/titleblock for annotation.
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 interface DocumentFileRow {
-  id: string | number;
+  id: string;
   enquirynumber: string | null;
   projectnumber: string | null;
   original_filename: string;
@@ -19,6 +20,19 @@ interface DocumentGroup {
   key: string;
   label: string;
   rows: DocumentFileRow[];
+}
+
+interface PageImageRow {
+  id: string;
+  document_id: string;
+  page_number: number;
+  image_object_path: string | null;
+  status: string | null;
+}
+
+interface ThumbnailInfo {
+  pageId: string;
+  imagePath: string;
 }
 
 /* --------- Small helpers --------- */
@@ -66,7 +80,53 @@ async function fetchRecentDocuments(
     return [];
   }
 
-  return data as DocumentFileRow[];
+  return data as unknown as DocumentFileRow[];
+}
+
+async function fetchPageThumbnailsForDocuments(
+  documentIds: string[],
+): Promise<Map<string, ThumbnailInfo>> {
+  const map = new Map<string, ThumbnailInfo>();
+
+  if (documentIds.length === 0) {
+    return map;
+  }
+
+  const supabase = createSupabaseServerClient();
+
+  const { data, error } = await supabase
+    .from('document_pages')
+    .select(
+      ['id', 'document_id', 'page_number', 'image_object_path', 'status'].join(
+        ',',
+      ),
+    )
+    .in('document_id', documentIds)
+    .eq('page_number', 1);
+
+  if (error || !data) {
+    console.error('Error fetching document_pages:', error);
+    return map;
+  }
+
+  const rows = data as unknown as PageImageRow[];
+
+  for (const row of rows) {
+    if (!row.image_object_path) {
+      continue;
+    }
+    if (row.status && row.status.toLowerCase() === 'error') {
+      continue;
+    }
+    if (!map.has(row.document_id)) {
+      map.set(row.document_id, {
+        pageId: row.id,
+        imagePath: row.image_object_path,
+      });
+    }
+  }
+
+  return map;
 }
 
 function groupDocuments(
@@ -123,7 +183,6 @@ function getGatewayBaseUrl(): string | null {
   if (!trimmed) {
     return null;
   }
-  // Remove any trailing slashes so we can safely append paths.
   return trimmed.replace(/\/+$/, '');
 }
 
@@ -145,8 +204,11 @@ export default async function HomePage() {
   const groups = groupDocuments(rows);
   const gatewayBaseUrl = getGatewayBaseUrl();
 
+  const docIds = rows.map((row) => row.id);
+  const thumbMap = await fetchPageThumbnailsForDocuments(docIds);
+
   return (
-    <div style={{ maxWidth: 900 }}>
+    <div style={{ maxWidth: 980 }}>
       <h1
         style={{
           fontSize: '1.6rem',
@@ -166,8 +228,9 @@ export default async function HomePage() {
         }}
       >
         Recent uploads from <code>document_files</code>, grouped by project or
-        enquiry. Files are stored on the NAS; the worker will update status,
-        page counts and previews as it processes each file.
+        enquiry. Files and derived page images are on the NAS; the worker
+        updates status, page counts and thumbnails. Click a thumbnail to define
+        the title-block area.
       </p>
 
       {groups.length === 0 && (
@@ -221,6 +284,15 @@ export default async function HomePage() {
                       borderBottom: '1px solid #e5e7eb',
                     }}
                   >
+                    Preview
+                  </th>
+                  <th
+                    style={{
+                      textAlign: 'left',
+                      padding: '0.3rem 0.4rem',
+                      borderBottom: '1px solid #e5e7eb',
+                    }}
+                  >
                     File
                   </th>
                   <th
@@ -263,13 +335,54 @@ export default async function HomePage() {
               </thead>
               <tbody>
                 {group.rows.map((row) => {
-                  const link = buildGatewayUrl(
+                  const thumbInfo = thumbMap.get(row.id) || null;
+                  const thumbUrl =
+                    thumbInfo && gatewayBaseUrl
+                      ? buildGatewayUrl(gatewayBaseUrl, thumbInfo.imagePath)
+                      : null;
+
+                  const pdfLink = buildGatewayUrl(
                     gatewayBaseUrl,
                     row.storage_object_path,
                   );
 
                   return (
                     <tr key={row.id}>
+                      <td
+                        style={{
+                          padding: '0.3rem 0.4rem',
+                          borderBottom: '1px solid #f1f5f9',
+                          minWidth: 120,
+                        }}
+                      >
+                        {thumbUrl && thumbInfo ? (
+                          <a
+                            href={`/pages/${thumbInfo.pageId}/titleblock`}
+                            title="Click to select title-block area"
+                          >
+                            <img
+                              src={thumbUrl}
+                              alt="Page 1 preview"
+                              style={{
+                                display: 'block',
+                                maxWidth: 110,
+                                maxHeight: 160,
+                                borderRadius: 2,
+                                border: '1px solid #e5e7eb',
+                              }}
+                            />
+                          </a>
+                        ) : (
+                          <span
+                            style={{
+                              fontSize: '0.75rem',
+                              color: '#9ca3af',
+                            }}
+                          >
+                            –
+                          </span>
+                        )}
+                      </td>
                       <td
                         style={{
                           padding: '0.3rem 0.4rem',
@@ -315,9 +428,9 @@ export default async function HomePage() {
                         }}
                         title={row.storage_object_path}
                       >
-                        {link ? (
+                        {pdfLink ? (
                           <a
-                            href={link}
+                            href={pdfLink}
                             target="_blank"
                             rel="noopener noreferrer"
                           >
