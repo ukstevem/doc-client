@@ -1,9 +1,18 @@
 // app/page.tsx
 // Dashboard showing recent document_files grouped by project / enquiry,
-// with thumbnails from document_pages (page 1).
-// Clicking a thumbnail navigates to /pages/[pageId]/titleblock for annotation.
+// with per-drawing metadata coming from document_pages (page 1).
+//
+// Title-block / OCR metadata:
+//   document_pages.drawing_number
+//   document_pages.drawing_title
+//   document_pages.revision
+//
+// Files live on the NAS via doc-gateway; thumbnails are page-1 PNGs.
 
+import Link from 'next/link';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+
+/* ------------ Types ------------ */
 
 interface DocumentFileRow {
   id: string;
@@ -22,20 +31,27 @@ interface DocumentGroup {
   rows: DocumentFileRow[];
 }
 
-interface PageImageRow {
+interface PageSummaryRow {
   id: string;
   document_id: string;
   page_number: number;
   image_object_path: string | null;
   status: string | null;
+  drawing_number: string | null;
+  drawing_title: string | null;
+  revision: string | null;
 }
 
-interface ThumbnailInfo {
+interface PageSummary {
   pageId: string;
-  imagePath: string;
+  imagePath: string | null;
+  status: string | null;
+  drawing_number: string | null;
+  drawing_title: string | null;
+  revision: string | null;
 }
 
-/* --------- Small helpers --------- */
+/* ------------ Helpers ------------ */
 
 function readEnv(name: string): string {
   const value = process.env[name];
@@ -48,14 +64,13 @@ function readEnv(name: string): string {
 function createSupabaseServerClient(): SupabaseClient {
   const url = readEnv('SUPABASE_URL');
   const key = readEnv('SUPABASE_SECRET_KEY');
+
   return createClient(url, key, {
     auth: { persistSession: false },
   });
 }
 
-async function fetchRecentDocuments(
-  limit: number,
-): Promise<DocumentFileRow[]> {
+async function fetchRecentDocuments(limit: number): Promise<DocumentFileRow[]> {
   const supabase = createSupabaseServerClient();
 
   const { data, error } = await supabase
@@ -83,10 +98,10 @@ async function fetchRecentDocuments(
   return data as unknown as DocumentFileRow[];
 }
 
-async function fetchPageThumbnailsForDocuments(
+async function fetchPageSummariesForDocuments(
   documentIds: string[],
-): Promise<Map<string, ThumbnailInfo>> {
-  const map = new Map<string, ThumbnailInfo>();
+): Promise<Map<string, PageSummary>> {
+  const map = new Map<string, PageSummary>();
 
   if (documentIds.length === 0) {
     return map;
@@ -97,9 +112,16 @@ async function fetchPageThumbnailsForDocuments(
   const { data, error } = await supabase
     .from('document_pages')
     .select(
-      ['id', 'document_id', 'page_number', 'image_object_path', 'status'].join(
-        ',',
-      ),
+      [
+        'id',
+        'document_id',
+        'page_number',
+        'image_object_path',
+        'status',
+        'drawing_number',
+        'drawing_title',
+        'revision',
+      ].join(','),
     )
     .in('document_id', documentIds)
     .eq('page_number', 1);
@@ -109,19 +131,17 @@ async function fetchPageThumbnailsForDocuments(
     return map;
   }
 
-  const rows = data as unknown as PageImageRow[];
+  const rows = data as unknown as PageSummaryRow[];
 
   for (const row of rows) {
-    if (!row.image_object_path) {
-      continue;
-    }
-    if (row.status && row.status.toLowerCase() === 'error') {
-      continue;
-    }
     if (!map.has(row.document_id)) {
       map.set(row.document_id, {
         pageId: row.id,
         imagePath: row.image_object_path,
+        status: row.status,
+        drawing_number: row.drawing_number,
+        drawing_title: row.drawing_title,
+        revision: row.revision,
       });
     }
   }
@@ -129,9 +149,7 @@ async function fetchPageThumbnailsForDocuments(
   return map;
 }
 
-function groupDocuments(
-  rows: DocumentFileRow[],
-): DocumentGroup[] {
+function groupDocuments(rows: DocumentFileRow[]): DocumentGroup[] {
   const groups = new Map<string, DocumentGroup>();
 
   for (const row of rows) {
@@ -154,6 +172,7 @@ function groupDocuments(
       group = { key, label, rows: [] };
       groups.set(key, group);
     }
+
     group.rows.push(row);
   }
 
@@ -162,13 +181,61 @@ function groupDocuments(
   return result;
 }
 
+// Sort by drawing_number then revision, based on page-1 metadata.
+function sortRowsForDisplay(
+  rows: DocumentFileRow[],
+  pageMap: Map<string, PageSummary>,
+): DocumentFileRow[] {
+  const copy = [...rows];
+
+  copy.sort((a, b) => {
+    const aMeta = pageMap.get(a.id) || null;
+    const bMeta = pageMap.get(b.id) || null;
+
+    const aNum =
+      aMeta?.drawing_number && aMeta.drawing_number.trim().length > 0
+        ? aMeta.drawing_number
+        : '\uffff';
+    const bNum =
+      bMeta?.drawing_number && bMeta.drawing_number.trim().length > 0
+        ? bMeta.drawing_number
+        : '\uffff';
+
+    const numCompare = aNum.localeCompare(bNum, undefined, {
+      numeric: true,
+      sensitivity: 'base',
+    });
+    if (numCompare !== 0) {
+      return numCompare;
+    }
+
+    const aRev =
+      aMeta?.revision && aMeta.revision.trim().length > 0
+        ? aMeta.revision
+        : '\uffff';
+    const bRev =
+      bMeta?.revision && bMeta.revision.trim().length > 0
+        ? bMeta.revision
+        : '\uffff';
+
+    return aRev.localeCompare(bRev, undefined, {
+      numeric: true,
+      sensitivity: 'base',
+    });
+  });
+
+  return copy;
+}
+
 function formatSize(bytes: number | null): string {
   if (!bytes || bytes <= 0) {
     return '-';
   }
+
   if (bytes < 1024) {
     return `${bytes} B`;
   }
+
   const kb = bytes / 1024;
   const rounded = Math.round(kb * 10) / 10;
   return `${rounded.toFixed(1)} kB`;
@@ -197,257 +264,170 @@ function buildGatewayUrl(
   return `${baseUrl}/${relative}`;
 }
 
-/* --------- Page component --------- */
+// Fallback title when drawing_title is not yet populated.
+function deriveDrawingTitle(row: DocumentFileRow): string {
+  const name = row.original_filename || '';
+  const lastDot = name.lastIndexOf('.');
+  if (lastDot > 0) {
+    return name.slice(0, lastDot);
+  }
+  return name;
+}
+
+/* ------------ Page component ------------ */
 
 export default async function HomePage() {
   const rows = await fetchRecentDocuments(50);
   const groups = groupDocuments(rows);
   const gatewayBaseUrl = getGatewayBaseUrl();
-
   const docIds = rows.map((row) => row.id);
-  const thumbMap = await fetchPageThumbnailsForDocuments(docIds);
+  const pageMap = await fetchPageSummariesForDocuments(docIds);
 
   return (
-    <div style={{ maxWidth: 980 }}>
-      <h1
-        style={{
-          fontSize: '1.6rem',
-          fontWeight: 600,
-          marginBottom: '0.5rem',
-          color: '#0f172a',
-        }}
-      >
-        Document control dashboard
-      </h1>
-
-      <p
-        style={{
-          fontSize: '0.95rem',
-          color: '#475569',
-          marginBottom: '1rem',
-        }}
-      >
-        Recent uploads from <code>document_files</code>, grouped by project or
-        enquiry. Files and derived page images are on the NAS; the worker
-        updates status, page counts and thumbnails. Click a thumbnail to define
-        the title-block area.
+    <main style={{ padding: '1rem 2rem', fontFamily: 'system-ui, sans-serif' }}>
+      <h1>Document control dashboard</h1>
+      <p style={{ marginBottom: '0.5rem' }}>
+        Recent uploads from <code>document_files</code>, grouped by project or enquiry.
+        Drawing metadata (number, title, revision) comes from{' '}
+        <code>document_pages</code> (page 1) after title-block tagging and OCR.
+      </p>
+      <p style={{ marginBottom: '1rem' }}>
+        Click a thumbnail to open the title-block annotator for that page.
       </p>
 
       {groups.length === 0 && (
-        <p
-          style={{
-            fontSize: '0.9rem',
-            color: '#64748b',
-          }}
-        >
+        <p>
           No documents found yet. Upload some PDFs on the{' '}
-          <code>Upload documents</code> page.
+          <Link href="/documents/upload">Upload documents</Link> page.
         </p>
       )}
 
-      {groups.map((group) => (
-        <section
-          key={group.key}
-          style={{
-            marginBottom: '1.25rem',
-            padding: '0.75rem 0.9rem',
-            borderRadius: 6,
-            border: '1px solid #e2e8f0',
-            backgroundColor: '#ffffff',
-          }}
-        >
-          <h2
-            style={{
-              fontSize: '1rem',
-              fontWeight: 600,
-              marginBottom: '0.5rem',
-              color: '#0f172a',
-            }}
-          >
-            {group.label}
-          </h2>
+      {groups.map((group) => {
+        const sortedRows = sortRowsForDisplay(group.rows, pageMap);
 
-          <div style={{ overflowX: 'auto' }}>
-            <table
-              style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                fontSize: '0.85rem',
-              }}
-            >
-              <thead>
-                <tr>
-                  <th
-                    style={{
-                      textAlign: 'left',
-                      padding: '0.3rem 0.4rem',
-                      borderBottom: '1px solid #e5e7eb',
-                    }}
-                  >
-                    Preview
-                  </th>
-                  <th
-                    style={{
-                      textAlign: 'left',
-                      padding: '0.3rem 0.4rem',
-                      borderBottom: '1px solid #e5e7eb',
-                    }}
-                  >
-                    File
-                  </th>
-                  <th
-                    style={{
-                      textAlign: 'left',
-                      padding: '0.3rem 0.4rem',
-                      borderBottom: '1px solid #e5e7eb',
-                    }}
-                  >
-                    Status
-                  </th>
-                  <th
-                    style={{
-                      textAlign: 'left',
-                      padding: '0.3rem 0.4rem',
-                      borderBottom: '1px solid #e5e7eb',
-                    }}
-                  >
-                    Pages
-                  </th>
-                  <th
-                    style={{
-                      textAlign: 'left',
-                      padding: '0.3rem 0.4rem',
-                      borderBottom: '1px solid #e5e7eb',
-                    }}
-                  >
-                    Size
-                  </th>
-                  <th
-                    style={{
-                      textAlign: 'left',
-                      padding: '0.3rem 0.4rem',
-                      borderBottom: '1px solid #e5e7eb',
-                    }}
-                  >
-                    NAS path
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {group.rows.map((row) => {
-                  const thumbInfo = thumbMap.get(row.id) || null;
-                  const thumbUrl =
-                    thumbInfo && gatewayBaseUrl
-                      ? buildGatewayUrl(gatewayBaseUrl, thumbInfo.imagePath)
-                      : null;
+        return (
+          <section key={group.key} style={{ marginTop: '2rem' }}>
+            <h2>{group.label}</h2>
 
-                  const pdfLink = buildGatewayUrl(
-                    gatewayBaseUrl,
-                    row.storage_object_path,
-                  );
+            <div style={{ overflowX: 'auto' }}>
+              <table
+                style={{
+                  width: '100%',
+                  borderCollapse: 'collapse',
+                  fontSize: '0.9rem',
+                }}
+              >
+                <thead>
+                  <tr>
+                    <th style={{ borderBottom: '1px solid #ccc', padding: '0.5rem' }}>
+                      Preview
+                    </th>
+                    <th style={{ borderBottom: '1px solid #ccc', padding: '0.5rem' }}>
+                      Drawing number
+                    </th>
+                    <th style={{ borderBottom: '1px solid #ccc', padding: '0.5rem' }}>
+                      Drawing title
+                    </th>
+                    <th style={{ borderBottom: '1px solid #ccc', padding: '0.5rem' }}>
+                      Revision
+                    </th>
+                    <th style={{ borderBottom: '1px solid #ccc', padding: '0.5rem' }}>
+                      Status
+                    </th>
+                    <th style={{ borderBottom: '1px solid #ccc', padding: '0.5rem' }}>
+                      Pages
+                    </th>
+                    <th style={{ borderBottom: '1px solid #ccc', padding: '0.5rem' }}>
+                      Size
+                    </th>
+                    <th style={{ borderBottom: '1px solid #ccc', padding: '0.5rem' }}>
+                      NAS path
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedRows.map((row) => {
+                    const page = pageMap.get(row.id) || null;
+                    const thumbUrl =
+                      page?.imagePath && gatewayBaseUrl
+                        ? buildGatewayUrl(gatewayBaseUrl, page.imagePath)
+                        : null;
+                    const pdfLink = buildGatewayUrl(
+                      gatewayBaseUrl,
+                      row.storage_object_path,
+                    );
 
-                  return (
-                    <tr key={row.id}>
-                      <td
-                        style={{
-                          padding: '0.3rem 0.4rem',
-                          borderBottom: '1px solid #f1f5f9',
-                          minWidth: 120,
-                        }}
-                      >
-                        {thumbUrl && thumbInfo ? (
-                          <a
-                            href={`/pages/${thumbInfo.pageId}/titleblock`}
-                            title="Click to select title-block area"
-                          >
-                            <img
-                              src={thumbUrl}
-                              alt="Page 1 preview"
-                              style={{
-                                display: 'block',
-                                maxWidth: 110,
-                                maxHeight: 160,
-                                borderRadius: 2,
-                                border: '1px solid #e5e7eb',
-                              }}
-                            />
-                          </a>
-                        ) : (
-                          <span
-                            style={{
-                              fontSize: '0.75rem',
-                              color: '#9ca3af',
-                            }}
-                          >
-                            –
-                          </span>
-                        )}
-                      </td>
-                      <td
-                        style={{
-                          padding: '0.3rem 0.4rem',
-                          borderBottom: '1px solid #f1f5f9',
-                        }}
-                      >
-                        <code>{row.original_filename}</code>
-                      </td>
-                      <td
-                        style={{
-                          padding: '0.3rem 0.4rem',
-                          borderBottom: '1px solid #f1f5f9',
-                        }}
-                      >
-                        {row.status || '-'}
-                      </td>
-                      <td
-                        style={{
-                          padding: '0.3rem 0.4rem',
-                          borderBottom: '1px solid #f1f5f9',
-                        }}
-                      >
-                        {row.page_count ?? '-'}
-                      </td>
-                      <td
-                        style={{
-                          padding: '0.3rem 0.4rem',
-                          borderBottom: '1px solid #f1f5f9',
-                        }}
-                      >
-                        {formatSize(row.file_size_bytes)}
-                      </td>
-                      <td
-                        style={{
-                          padding: '0.3rem 0.4rem',
-                          borderBottom: '1px solid #f1f5f9',
-                          maxWidth: 260,
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          fontFamily: 'monospace',
-                          fontSize: '0.8rem',
-                        }}
-                        title={row.storage_object_path}
-                      >
-                        {pdfLink ? (
-                          <a
-                            href={pdfLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            {row.storage_object_path}
-                          </a>
-                        ) : (
-                          row.storage_object_path
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ))}
-    </div>
+                    const drawingNumber = page?.drawing_number || '';
+                    const drawingTitle =
+                      page?.drawing_title ||
+                      (deriveDrawingTitle(row) || '');
+                    const revision = page?.revision || '';
+
+                    return (
+                      <tr key={row.id}>
+                        <td
+                          style={{
+                            borderBottom: '1px solid #eee',
+                            padding: '0.5rem',
+                            textAlign: 'center',
+                          }}
+                        >
+                          {thumbUrl && page ? (
+                            <Link href={`/pages/${page.pageId}/titleblock`}>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={thumbUrl}
+                                alt="Page 1 preview"
+                                style={{
+                                  maxWidth: '120px',
+                                  maxHeight: '120px',
+                                  border: '1px solid #ccc',
+                                }}
+                              />
+                            </Link>
+                          ) : (
+                            <span>–</span>
+                          )}
+                        </td>
+                        <td style={{ borderBottom: '1px solid #eee', padding: '0.5rem' }}>
+                          {drawingNumber || '–'}
+                        </td>
+                        <td style={{ borderBottom: '1px solid #eee', padding: '0.5rem' }}>
+                          {drawingTitle || '–'}
+                        </td>
+                        <td style={{ borderBottom: '1px solid #eee', padding: '0.5rem' }}>
+                          {revision || '–'}
+                        </td>
+                        <td style={{ borderBottom: '1px solid #eee', padding: '0.5rem' }}>
+                          {row.status || '-'}
+                          {page?.status && page.status !== row.status
+                            ? ` (page: ${page.status})`
+                            : ''}
+                        </td>
+                        <td style={{ borderBottom: '1px solid #eee', padding: '0.5rem' }}>
+                          {row.page_count ?? '-'}
+                        </td>
+                        <td style={{ borderBottom: '1px solid #eee', padding: '0.5rem' }}>
+                          {formatSize(row.file_size_bytes)}
+                        </td>
+                        <td style={{ borderBottom: '1px solid #eee', padding: '0.5rem' }}>
+                          {pdfLink ? (
+                            <a href={pdfLink} target="_blank" rel="noreferrer">
+                              {row.storage_object_path}
+                            </a>
+                          ) : (
+                            row.storage_object_path
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        );
+      })}
+    </main>
   );
 }

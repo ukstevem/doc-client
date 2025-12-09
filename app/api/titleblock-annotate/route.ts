@@ -8,22 +8,26 @@ export const runtime = 'nodejs';
 type FieldKey = 'drawing_number' | 'drawing_title' | 'revision' | 'other';
 
 interface TitleblockRectPayload {
+  // Normalised to page: 0–1
   x: number;
   y: number;
   width: number;
   height: number;
 }
 
-interface ClickPayload {
+interface AreaPayload {
+  // Normalised to title-block: 0–1
   field: FieldKey;
   x_rel: number;
   y_rel: number;
+  width_rel: number;
+  height_rel: number;
 }
 
 interface AnnotatePayload {
   pageId: string;
   titleblock: TitleblockRectPayload;
-  clicks: ClickPayload[];
+  areas: AreaPayload[];
 }
 
 function readEnv(name: string): string {
@@ -49,6 +53,7 @@ function validatePayload(payload: Partial<AnnotatePayload>): string | null {
   if (!payload.titleblock) {
     return 'titleblock is required.';
   }
+
   const tb = payload.titleblock;
   if (
     typeof tb.x !== 'number' ||
@@ -61,36 +66,55 @@ function validatePayload(payload: Partial<AnnotatePayload>): string | null {
   if (tb.width <= 0 || tb.height <= 0) {
     return 'titleblock width and height must be positive.';
   }
-
-  if (!Array.isArray(payload.clicks)) {
-    return null; // clicks are optional
+  if (
+    tb.x < 0 ||
+    tb.x > 1 ||
+    tb.y < 0 ||
+    tb.y > 1 ||
+    tb.width <= 0 ||
+    tb.width > 1 ||
+    tb.height <= 0 ||
+    tb.height > 1
+  ) {
+    return 'titleblock x, y, width, height must be between 0 and 1.';
   }
 
-  for (const c of payload.clicks) {
-    if (!c) {
+  if (!Array.isArray(payload.areas)) {
+    // Areas are optional
+    return null;
+  }
+
+  for (const a of payload.areas) {
+    if (!a) {
       continue;
     }
     if (
-      c.field !== 'drawing_number' &&
-      c.field !== 'drawing_title' &&
-      c.field !== 'revision' &&
-      c.field !== 'other'
+      a.field !== 'drawing_number' &&
+      a.field !== 'drawing_title' &&
+      a.field !== 'revision' &&
+      a.field !== 'other'
     ) {
-      return 'click field must be one of drawing_number, drawing_title, revision, other.';
+      return 'area field must be one of drawing_number, drawing_title, revision, other.';
     }
     if (
-      typeof c.x_rel !== 'number' ||
-      typeof c.y_rel !== 'number'
+      typeof a.x_rel !== 'number' ||
+      typeof a.y_rel !== 'number' ||
+      typeof a.width_rel !== 'number' ||
+      typeof a.height_rel !== 'number'
     ) {
-      return 'click x_rel and y_rel must be numbers.';
+      return 'area x_rel, y_rel, width_rel, height_rel must be numbers.';
     }
     if (
-      c.x_rel < 0 ||
-      c.x_rel > 1 ||
-      c.y_rel < 0 ||
-      c.y_rel > 1
+      a.x_rel < 0 ||
+      a.x_rel > 1 ||
+      a.y_rel < 0 ||
+      a.y_rel > 1 ||
+      a.width_rel <= 0 ||
+      a.width_rel > 1 ||
+      a.height_rel <= 0 ||
+      a.height_rel > 1
     ) {
-      return 'click x_rel and y_rel must be between 0 and 1.';
+      return 'area x_rel, y_rel, width_rel, height_rel must be between 0 and 1 (width/height > 0).';
     }
   }
 
@@ -113,19 +137,19 @@ export async function POST(request: Request) {
     const supabase = createSupabaseClient();
 
     const fingerprint = {
-      version: 1,
-      clicks: payload.clicks ?? [],
+      version: 2,
+      areas: payload.areas ?? [],
     };
 
     const { error: updateError } = await supabase
       .from('document_pages')
       .update({
-        titleblock_x: Math.round(payload.titleblock.x),
-        titleblock_y: Math.round(payload.titleblock.y),
-        titleblock_width: Math.round(payload.titleblock.width),
-        titleblock_height: Math.round(payload.titleblock.height),
+        titleblock_x: payload.titleblock.x,
+        titleblock_y: payload.titleblock.y,
+        titleblock_width: payload.titleblock.width,
+        titleblock_height: payload.titleblock.height,
         titleblock_fingerprint: fingerprint,
-        titleblock_fingerprint_version: 1,
+        titleblock_fingerprint_version: 2,
         status: 'tagged',
       })
       .eq('id', payload.pageId);
@@ -173,7 +197,7 @@ export async function DELETE(request: Request) {
         titleblock_height: null,
         titleblock_fingerprint: null,
         titleblock_fingerprint_version: null,
-        // status: ???  ← leaving status unchanged on clear for now
+        // status is left alone on clear
       })
       .eq('id', body.pageId);
 

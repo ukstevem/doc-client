@@ -2,30 +2,33 @@
 
 import React, {
   MouseEvent as ReactMouseEvent,
+  useEffect,
   useRef,
   useState,
 } from 'react';
 
-interface PixelRect {
-  x: number;
-  y: number;
+interface NormalisedRect {
+  left: number;
+  top: number;
   width: number;
   height: number;
 }
 
 type FieldKey = 'drawing_number' | 'drawing_title' | 'revision' | 'other';
 
-interface FingerprintClick {
+interface FieldArea {
   field: FieldKey;
   x_rel: number;
   y_rel: number;
+  width_rel: number;
+  height_rel: number;
 }
 
 interface TitleblockAnnotatorProps {
   pageId: string;
   imageUrl: string;
-  initialTitleblockRect: PixelRect | null;
-  initialClicks: FingerprintClick[];
+  initialTitleblockRectNorm: NormalisedRect | null;
+  initialAreas: FieldArea[];
 }
 
 interface NormalisedPoint {
@@ -33,34 +36,32 @@ interface NormalisedPoint {
   y: number;
 }
 
-interface FieldPoint {
+interface FieldAreaLocal {
   x_rel: number;
   y_rel: number;
+  width_rel: number;
+  height_rel: number;
 }
 
-interface FieldPointMap {
-  drawing_number: FieldPoint | null;
-  drawing_title: FieldPoint | null;
-  revision: FieldPoint | null;
-  other: FieldPoint | null;
+interface FieldAreaMap {
+  drawing_number: FieldAreaLocal | null;
+  drawing_title: FieldAreaLocal | null;
+  revision: FieldAreaLocal | null;
+  other: FieldAreaLocal | null;
 }
 
 type ActiveTool = 'titleblock' | FieldKey | null;
 
 function clamp01(value: number): number {
-  if (value < 0) {
-    return 0;
-  }
-  if (value > 1) {
-    return 1;
-  }
+  if (value < 0) return 0;
+  if (value > 1) return 1;
   return value;
 }
 
 function computeNormRect(
   start: NormalisedPoint | null,
   current: NormalisedPoint | null,
-): { left: number; top: number; width: number; height: number } | null {
+): NormalisedRect | null {
   if (!start || !current) {
     return null;
   }
@@ -82,264 +83,345 @@ function computeNormRect(
   return { left, top, width, height };
 }
 
-function pixelRectFromNormUsingOverlay(
-  rectNorm:
-    | { left: number; top: number; width: number; height: number }
-    | null,
-  overlay: HTMLDivElement | null,
-): PixelRect | null {
-  if (!rectNorm || !overlay) {
-    return null;
-  }
-
-  const rect = overlay.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) {
-    return null;
-  }
-
-  const x = Math.round(rectNorm.left * rect.width);
-  const y = Math.round(rectNorm.top * rect.height);
-  const width = Math.round(rectNorm.width * rect.width);
-  const height = Math.round(rectNorm.height * rect.height);
-
-  if (width <= 0 || height <= 0) {
-    return null;
-  }
-
-  return { x, y, width, height };
-}
-
-function buildInitialFieldPoints(
-  clicks: FingerprintClick[],
-): FieldPointMap {
-  const result: FieldPointMap = {
+function buildInitialFieldAreas(areas: FieldArea[]): FieldAreaMap {
+  const result: FieldAreaMap = {
     drawing_number: null,
     drawing_title: null,
     revision: null,
     other: null,
   };
 
-  for (const c of clicks) {
-    if (
-      c.field === 'drawing_number' ||
-      c.field === 'drawing_title' ||
-      c.field === 'revision' ||
-      c.field === 'other'
-    ) {
-      result[c.field] = { x_rel: c.x_rel, y_rel: c.y_rel };
+  for (const a of areas) {
+    const local: FieldAreaLocal = {
+      x_rel: a.x_rel,
+      y_rel: a.y_rel,
+      width_rel: a.width_rel,
+      height_rel: a.height_rel,
+    };
+    if (a.field === 'drawing_number') {
+      result.drawing_number = local;
+    } else if (a.field === 'drawing_title') {
+      result.drawing_title = local;
+    } else if (a.field === 'revision') {
+      result.revision = local;
+    } else if (a.field === 'other') {
+      result.other = local;
     }
   }
 
   return result;
 }
 
+function isFieldTool(tool: ActiveTool): tool is FieldKey {
+  return (
+    tool === 'drawing_number' ||
+    tool === 'drawing_title' ||
+    tool === 'revision' ||
+    tool === 'other'
+  );
+}
+
 export default function TitleblockAnnotator(
   props: TitleblockAnnotatorProps,
 ) {
-  const { pageId, imageUrl, initialTitleblockRect, initialClicks } = props;
+  const { pageId, imageUrl, initialTitleblockRectNorm, initialAreas } =
+    props;
 
-  const overlayRef = useRef<HTMLDivElement | null>(null);
+  // Full-page overlay (for title-block selection)
+  const pageOverlayRef = useRef<HTMLDivElement | null>(null);
 
-  const [titleblockRect, setTitleblockRect] = useState<PixelRect | null>(
-    initialTitleblockRect,
+  // Zoomed title-block view (cropped canvas + overlay)
+  const zoomCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const zoomOverlayRef = useRef<HTMLDivElement | null>(null);
+
+  // Title-block rect normalised to full page (0–1)
+  const [titleblock, setTitleblock] = useState<NormalisedRect | null>(
+    initialTitleblockRectNorm,
   );
-  const [draftStart, setDraftStart] = useState<NormalisedPoint | null>(
-    null,
-  );
-  const [draftCurrent, setDraftCurrent] =
+
+  // Draft selection on the page (before confirm)
+  const [pageDraftStart, setPageDraftStart] =
     useState<NormalisedPoint | null>(null);
-  const [dragging, setDragging] = useState(false);
+  const [pageDraftCurrent, setPageDraftCurrent] =
+    useState<NormalisedPoint | null>(null);
+  const [draggingPage, setDraggingPage] = useState(false);
 
-  const [fieldPoints, setFieldPoints] = useState<FieldPointMap>(() =>
-    buildInitialFieldPoints(initialClicks),
+  // Draft selection on the zoomed title-block (for field areas)
+  const [zoomDraftStart, setZoomDraftStart] =
+    useState<NormalisedPoint | null>(null);
+  const [zoomDraftCurrent, setZoomDraftCurrent] =
+    useState<NormalisedPoint | null>(null);
+  const [draggingZoom, setDraggingZoom] = useState(false);
+
+  // Areas per field, normalised to title-block (0–1)
+  const [fieldAreas, setFieldAreas] = useState<FieldAreaMap>(() =>
+    buildInitialFieldAreas(initialAreas),
   );
 
   const [activeTool, setActiveTool] = useState<ActiveTool>(() =>
-    initialTitleblockRect ? 'drawing_number' : 'titleblock',
+    initialTitleblockRectNorm ? 'drawing_number' : 'titleblock',
   );
 
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
-  const hasTitleblock = titleblockRect !== null;
+  const busy = saving || clearing;
+  const titleblockDefined = !!titleblock;
 
-  function getNormalisedPoint(
+  const pageDraftRect = computeNormRect(pageDraftStart, pageDraftCurrent);
+  const zoomDraftRect = computeNormRect(zoomDraftStart, zoomDraftCurrent);
+
+  // Draw zoomed title-block into canvas whenever title-block or image changes.
+  useEffect(() => {
+    const canvas = zoomCanvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    if (!titleblockDefined || !titleblock) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+
+    const img = new Image();
+    img.src = imageUrl;
+
+    img.onload = () => {
+      const natW = img.naturalWidth || img.width;
+      const natH = img.naturalHeight || img.height;
+      if (natW <= 0 || natH <= 0) {
+        return;
+      }
+
+      const sx = titleblock.left * natW;
+      const sy = titleblock.top * natH;
+      const sWidth = titleblock.width * natW;
+      const sHeight = titleblock.height * natH;
+      if (sWidth <= 0 || sHeight <= 0) {
+        return;
+      }
+
+      const maxWidth = 800;
+      const scale = maxWidth / sWidth;
+      const targetWidth = maxWidth;
+      const targetHeight = Math.max(120, sHeight * scale);
+
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+
+      ctx.clearRect(0, 0, targetWidth, targetHeight);
+      ctx.drawImage(
+        img,
+        sx,
+        sy,
+        sWidth,
+        sHeight,
+        0,
+        0,
+        targetWidth,
+        targetHeight,
+      );
+    };
+  }, [imageUrl, titleblockDefined, titleblock]);
+
+  // Helpers to map mouse to normalised coordinates in each overlay
+  function getNormalisedPointInPage(
     event: ReactMouseEvent<HTMLDivElement, MouseEvent>,
   ): NormalisedPoint | null {
-    const overlay = overlayRef.current;
-    if (!overlay) {
-      return null;
-    }
-
+    const overlay = pageOverlayRef.current;
+    if (!overlay) return null;
     const rect = overlay.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) {
-      return null;
-    }
+    if (rect.width <= 0 || rect.height <= 0) return null;
 
     const x = (event.clientX - rect.left) / rect.width;
     const y = (event.clientY - rect.top) / rect.height;
-
     return { x: clamp01(x), y: clamp01(y) };
   }
 
-  function handleOverlayMouseDown(
+  function getNormalisedPointInZoom(
+    event: ReactMouseEvent<HTMLDivElement, MouseEvent>,
+  ): NormalisedPoint | null {
+    const overlay = zoomOverlayRef.current;
+    if (!overlay) return null;
+    const rect = overlay.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+
+    const x = (event.clientX - rect.left) / rect.width;
+    const y = (event.clientY - rect.top) / rect.height;
+    return { x: clamp01(x), y: clamp01(y) };
+  }
+
+  // Page overlay – title-block selection only
+  function handlePageMouseDown(
     event: ReactMouseEvent<HTMLDivElement, MouseEvent>,
   ): void {
-    if (activeTool !== 'titleblock') {
-      return;
-    }
+    if (busy) return;
+    if (activeTool !== 'titleblock') return;
 
     event.preventDefault();
+    const p = getNormalisedPointInPage(event);
+    if (!p) return;
 
-    const point = getNormalisedPoint(event);
-    if (!point) {
-      return;
-    }
-
-    setDraftStart(point);
-    setDraftCurrent(point);
-    setDragging(true);
+    setPageDraftStart(p);
+    setPageDraftCurrent(p);
+    setDraggingPage(true);
     setStatusMessage(null);
   }
 
-  function handleOverlayMouseMove(
+  function handlePageMouseMove(
     event: ReactMouseEvent<HTMLDivElement, MouseEvent>,
   ): void {
-    if (!dragging || activeTool !== 'titleblock') {
-      return;
-    }
+    if (!draggingPage) return;
+    if (activeTool !== 'titleblock') return;
 
-    const point = getNormalisedPoint(event);
-    if (!point) {
-      return;
-    }
+    const p = getNormalisedPointInPage(event);
+    if (!p) return;
 
-    setDraftCurrent(point);
+    setPageDraftCurrent(p);
   }
 
-  function handleOverlayMouseUp(): void {
-    if (!dragging) {
-      return;
-    }
-    setDragging(false);
+  function handlePageMouseUp(): void {
+    if (!draggingPage) return;
+    setDraggingPage(false);
+    // We keep the draft rect; user presses Confirm to commit.
   }
 
-  function handleOverlayMouseLeave(): void {
-    if (!dragging) {
-      return;
-    }
-    setDragging(false);
+  function handlePageMouseLeave(): void {
+    if (!draggingPage) return;
+    setDraggingPage(false);
   }
 
+  // Zoom overlay – field area selection
+  function handleZoomMouseDown(
+    event: ReactMouseEvent<HTMLDivElement, MouseEvent>,
+  ): void {
+    if (busy) return;
+    if (!titleblockDefined || !titleblock) return;
+    if (!isFieldTool(activeTool)) return;
+
+    event.preventDefault();
+    const p = getNormalisedPointInZoom(event);
+    if (!p) return;
+
+    setZoomDraftStart(p);
+    setZoomDraftCurrent(p);
+    setDraggingZoom(true);
+    setStatusMessage(null);
+  }
+
+  function handleZoomMouseMove(
+    event: ReactMouseEvent<HTMLDivElement, MouseEvent>,
+  ): void {
+    if (!draggingZoom) return;
+    if (!isFieldTool(activeTool)) return;
+
+    const p = getNormalisedPointInZoom(event);
+    if (!p) return;
+
+    setZoomDraftCurrent(p);
+  }
+
+  function commitZoomSelection(): void {
+    if (!isFieldTool(activeTool)) return;
+    const rect = computeNormRect(zoomDraftStart, zoomDraftCurrent);
+    if (!rect) {
+      setStatusMessage(
+        'No selection defined. Click and drag a rectangle in the zoomed title-block.',
+      );
+      return;
+    }
+
+    const { left, top, width, height } = rect;
+    if (width <= 0 || height <= 0) {
+      setStatusMessage('Selection is too small inside the title-block.');
+      return;
+    }
+
+    setFieldAreas((prev) => ({
+      ...prev,
+      [activeTool]: {
+        x_rel: clamp01(left),
+        y_rel: clamp01(top),
+        width_rel: clamp01(width),
+        height_rel: clamp01(height),
+      },
+    }));
+
+    setStatusMessage(
+      `Set ${activeTool} area (${left.toFixed(2)}, ${top.toFixed(
+        2,
+      )}, ${width.toFixed(2)} × ${height.toFixed(2)}) in the title-block.`,
+    );
+  }
+
+  function handleZoomMouseUp(): void {
+    if (!draggingZoom) return;
+    setDraggingZoom(false);
+    if (isFieldTool(activeTool)) {
+      commitZoomSelection();
+    }
+  }
+
+  function handleZoomMouseLeave(): void {
+    if (!draggingZoom) return;
+    setDraggingZoom(false);
+    if (isFieldTool(activeTool)) {
+      commitZoomSelection();
+    }
+  }
+
+  // Clicks are no-op now; we use drag rectangles.
   function handleOverlayClick(
-    event: ReactMouseEvent<HTMLDivElement, MouseEvent>,
+    _event: ReactMouseEvent<HTMLDivElement, MouseEvent>,
   ): void {
-    if (
-      activeTool === 'titleblock' ||
-      !titleblockRect ||
-      !overlayRef.current
-    ) {
-      return;
-    }
-
-    const overlay = overlayRef.current;
-    const rect = overlay.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) {
-      return;
-    }
-
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-
-    const tb = titleblockRect;
-    const insideX = x >= tb.x && x <= tb.x + tb.width;
-    const insideY = y >= tb.y && y <= tb.y + tb.height;
-
-    if (!insideX || !insideY) {
-      setStatusMessage(
-        'Click was outside the title-block area. Please click inside the green box.',
-      );
-      return;
-    }
-
-    const x_rel = clamp01((x - tb.x) / tb.width);
-    const y_rel = clamp01((y - tb.y) / tb.height);
-
-    if (
-      activeTool === 'drawing_number' ||
-      activeTool === 'drawing_title' ||
-      activeTool === 'revision' ||
-      activeTool === 'other'
-    ) {
-      setFieldPoints((prev) => ({
-        ...prev,
-        [activeTool]: { x_rel, y_rel },
-      }));
-      setStatusMessage(
-        `Set ${activeTool} at (${x_rel.toFixed(2)}, ${y_rel.toFixed(
-          2,
-        )}) inside title-block.`,
-      );
-    }
+    // no-op
   }
 
   function handleConfirmTitleblock(): void {
     setStatusMessage(null);
 
-    const overlay = overlayRef.current;
-    if (!overlay) {
-      setStatusMessage(
-        'Overlay not ready. Please try again after the image has loaded.',
-      );
+    if (titleblockDefined && titleblock) {
+      setStatusMessage('Title-block is already confirmed. Clear first to redefine.');
       return;
     }
 
-    const normRect = computeNormRect(draftStart, draftCurrent);
-
-    if (!normRect) {
+    const rect = computeNormRect(pageDraftStart, pageDraftCurrent);
+    if (!rect) {
       setStatusMessage(
         'No selection defined. Click and drag a rectangle around the title-block, then click Confirm title-block.',
       );
       return;
     }
 
-    const rect = pixelRectFromNormUsingOverlay(normRect, overlay);
-
-    if (!rect) {
+    if (rect.width < 0.02 || rect.height < 0.02) {
       setStatusMessage(
-        'Unable to compute title-block rectangle. Please try again.',
+        'Selection is very small. Please drag a larger title-block area.',
       );
       return;
     }
 
-    if (rect.width < 10 || rect.height < 10) {
-      setStatusMessage(
-        'Selection is too small. Please drag a larger title-block area.',
-      );
-      return;
-    }
-
-    setTitleblockRect(rect);
-    setDraftStart(null);
-    setDraftCurrent(null);
+    setTitleblock(rect);
+    setPageDraftStart(null);
+    setPageDraftCurrent(null);
     setActiveTool('drawing_number');
     setStatusMessage(
-      `Title-block set at x=${rect.x}, y=${rect.y}, w=${rect.width}, h=${rect.height}.`,
+      'Title-block set. Now use the zoomed view to mark drawing number, title, and revision.',
     );
   }
 
   async function handleSaveAll(): Promise<void> {
     setStatusMessage(null);
 
-    if (!titleblockRect) {
+    if (!titleblockDefined || !titleblock) {
       setStatusMessage(
         'Title-block is not defined. Set the title-block before saving.',
       );
       return;
     }
 
-    const clicks: FingerprintClick[] = [];
+    const areasToSave: FieldArea[] = [];
     const keys: FieldKey[] = [
       'drawing_number',
       'drawing_title',
@@ -348,14 +430,14 @@ export default function TitleblockAnnotator(
     ];
 
     for (const key of keys) {
-      const p = fieldPoints[key];
-      if (!p) {
-        continue;
-      }
-      clicks.push({
+      const area = fieldAreas[key];
+      if (!area) continue;
+      areasToSave.push({
         field: key,
-        x_rel: p.x_rel,
-        y_rel: p.y_rel,
+        x_rel: area.x_rel,
+        y_rel: area.y_rel,
+        width_rel: area.width_rel,
+        height_rel: area.height_rel,
       });
     }
 
@@ -368,12 +450,12 @@ export default function TitleblockAnnotator(
         body: JSON.stringify({
           pageId,
           titleblock: {
-            x: titleblockRect.x,
-            y: titleblockRect.y,
-            width: titleblockRect.width,
-            height: titleblockRect.height,
+            x: titleblock.left,
+            y: titleblock.top,
+            width: titleblock.width,
+            height: titleblock.height,
           },
-          clicks,
+          areas: areasToSave,
         }),
       });
 
@@ -385,7 +467,7 @@ export default function TitleblockAnnotator(
           `Save failed with status ${response.status}`;
         setStatusMessage(message);
       } else {
-        setStatusMessage('Title-block and field clicks saved.');
+        setStatusMessage('Title-block and field areas saved (status set to Tagged).');
       }
     } catch {
       setStatusMessage('Network or server error while saving.');
@@ -398,11 +480,11 @@ export default function TitleblockAnnotator(
     setStatusMessage(null);
 
     const nothingToClear =
-      !titleblockRect &&
-      !fieldPoints.drawing_number &&
-      !fieldPoints.drawing_title &&
-      !fieldPoints.revision &&
-      !fieldPoints.other;
+      !titleblockDefined &&
+      !fieldAreas.drawing_number &&
+      !fieldAreas.drawing_title &&
+      !fieldAreas.revision &&
+      !fieldAreas.other;
 
     if (nothingToClear) {
       setStatusMessage('Nothing to clear for this page.');
@@ -433,10 +515,12 @@ export default function TitleblockAnnotator(
           `Clear failed with status ${response.status}`;
         setStatusMessage(message);
       } else {
-        setTitleblockRect(null);
-        setDraftStart(null);
-        setDraftCurrent(null);
-        setFieldPoints({
+        setTitleblock(null);
+        setPageDraftStart(null);
+        setPageDraftCurrent(null);
+        setZoomDraftStart(null);
+        setZoomDraftCurrent(null);
+        setFieldAreas({
           drawing_number: null,
           drawing_title: null,
           revision: null,
@@ -452,21 +536,19 @@ export default function TitleblockAnnotator(
     }
   }
 
-  const draftRectNorm = computeNormRect(draftStart, draftCurrent);
-
-  function renderOverlayRects() {
+  function renderPageOverlayRects() {
     const elements: React.ReactNode[] = [];
 
-    if (titleblockRect) {
+    if (titleblockDefined && titleblock) {
       elements.push(
         <div
           key="titleblock"
           style={{
             position: 'absolute',
-            left: titleblockRect.x,
-            top: titleblockRect.y,
-            width: titleblockRect.width,
-            height: titleblockRect.height,
+            left: `${titleblock.left * 100}%`,
+            top: `${titleblock.top * 100}%`,
+            width: `${titleblock.width * 100}%`,
+            height: `${titleblock.height * 100}%`,
             border: '2px solid #22c55e',
             backgroundColor: 'rgba(34, 197, 94, 0.12)',
             boxSizing: 'border-box',
@@ -474,18 +556,16 @@ export default function TitleblockAnnotator(
           }}
         />,
       );
-    }
-
-    if (draftRectNorm && !titleblockRect && overlayRef.current) {
+    } else if (pageDraftRect) {
       elements.push(
         <div
           key="draft"
           style={{
             position: 'absolute',
-            left: `${draftRectNorm.left * 100}%`,
-            top: `${draftRectNorm.top * 100}%`,
-            width: `${draftRectNorm.width * 100}%`,
-            height: `${draftRectNorm.height * 100}%`,
+            left: `${pageDraftRect.left * 100}%`,
+            top: `${pageDraftRect.top * 100}%`,
+            width: `${pageDraftRect.width * 100}%`,
+            height: `${pageDraftRect.height * 100}%`,
             border: '2px solid #ef4444',
             backgroundColor: 'rgba(239, 68, 68, 0.18)',
             boxSizing: 'border-box',
@@ -498,89 +578,113 @@ export default function TitleblockAnnotator(
     return elements;
   }
 
-  function renderFieldMarkers() {
-    if (!titleblockRect) {
+  function renderZoomOverlayRects() {
+    if (!titleblockDefined || !titleblock) {
       return null;
     }
 
-    const tb = titleblockRect;
-    const markers: React.ReactNode[] = [];
+    const elements: React.ReactNode[] = [];
 
-    const entries: [FieldKey, FieldPoint | null][] = [
-      ['drawing_number', fieldPoints.drawing_number],
-      ['drawing_title', fieldPoints.drawing_title],
-      ['revision', fieldPoints.revision],
-      ['other', fieldPoints.other],
+    const entries: [FieldKey, FieldAreaLocal | null][] = [
+      ['drawing_number', fieldAreas.drawing_number],
+      ['drawing_title', fieldAreas.drawing_title],
+      ['revision', fieldAreas.revision],
+      ['other', fieldAreas.other],
     ];
 
-    for (const [field, pt] of entries) {
-      if (!pt) {
-        continue;
-      }
+    for (const [field, area] of entries) {
+      if (!area) continue;
 
-      const x = tb.x + pt.x_rel * tb.width;
-      const y = tb.y + pt.y_rel * tb.height;
-
-      const label =
-        field === 'drawing_number'
-          ? 'D'
-          : field === 'drawing_title'
-          ? 'T'
-          : field === 'revision'
-          ? 'R'
-          : 'O';
+      const left = area.x_rel;
+      const top = area.y_rel;
+      const width = area.width_rel;
+      const height = area.height_rel;
 
       let borderColor = '#1d4ed8';
-      let backgroundColor = '#60a5fa';
+      let backgroundColor = 'rgba(37, 99, 235, 0.25)';
+      let label = 'O';
 
       if (field === 'drawing_number') {
         borderColor = '#0f766e';
-        backgroundColor = '#14b8a6';
+        backgroundColor = 'rgba(20, 184, 166, 0.25)';
+        label = 'D';
       } else if (field === 'drawing_title') {
         borderColor = '#4f46e5';
-        backgroundColor = '#6366f1';
+        backgroundColor = 'rgba(99, 102, 241, 0.25)';
+        label = 'T';
       } else if (field === 'revision') {
         borderColor = '#b45309';
-        backgroundColor = '#f97316';
+        backgroundColor = 'rgba(249, 115, 22, 0.25)';
+        label = 'R';
       } else if (field === 'other') {
         borderColor = '#4b5563';
-        backgroundColor = '#9ca3af';
+        backgroundColor = 'rgba(156, 163, 175, 0.25)';
+        label = 'O';
       }
 
-      markers.push(
+      elements.push(
         <div
-          key={field}
-          title={field}
+          key={`area-${field}`}
           style={{
             position: 'absolute',
-            left: x,
-            top: y,
-            transform: 'translate(-50%, -50%)',
-            width: 14,
-            height: 14,
-            borderRadius: '50%',
+            left: `${left * 100}%`,
+            top: `${top * 100}%`,
+            width: `${width * 100}%`,
+            height: `${height * 100}%`,
             border: `2px solid ${borderColor}`,
             backgroundColor,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '0.6rem',
-            color: '#ffffff',
             boxSizing: 'border-box',
             pointerEvents: 'none',
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'flex-start',
+            fontSize: '0.65rem',
+            color: '#111827',
+            padding: 2,
           }}
         >
-          {label}
+          <span
+            style={{
+              backgroundColor: borderColor,
+              color: '#ffffff',
+              borderRadius: 9999,
+              padding: '0 4px',
+              lineHeight: 1.2,
+            }}
+          >
+            {label}
+          </span>
         </div>,
       );
     }
 
-    return markers;
+    if (zoomDraftRect) {
+      elements.push(
+        <div
+          key="zoom-draft"
+          style={{
+            position: 'absolute',
+            left: `${zoomDraftRect.left * 100}%`,
+            top: `${zoomDraftRect.top * 100}%`,
+            width: `${zoomDraftRect.width * 100}%`,
+            height: `${zoomDraftRect.height * 100}%`,
+            border: '2px solid #ef4444',
+            backgroundColor: 'rgba(239, 68, 68, 0.18)',
+            boxSizing: 'border-box',
+            pointerEvents: 'none',
+          }}
+        />,
+      );
+    }
+
+    return elements;
   }
 
-  const titleblockButtonDisabled = !!titleblockRect;
-  const otherButtonsDisabled = !titleblockRect;
-  const busy = saving || clearing;
+  const titleblockButtonDisabled = titleblockDefined || busy;
+  const fieldButtonsDisabled = !titleblockDefined || busy;
+  const hasPageDraft = !!pageDraftRect;
+  const confirmDisabled = titleblockDefined || busy || !hasPageDraft;
+  const saveDisabled = !titleblockDefined || busy;
 
   return (
     <div>
@@ -593,16 +697,16 @@ export default function TitleblockAnnotator(
       >
         <p style={{ marginBottom: '0.25rem' }}>
           1. With <strong>Title-block</strong> selected, click and drag a
-          rectangle around the title-block on the page.
+          rectangle around the title-block on the full page.
         </p>
         <p style={{ marginBottom: '0.25rem' }}>
-          2. Click <strong>Confirm title-block</strong>. The box turns
-          green.
+          2. Click <strong>Confirm title-block</strong>. The green box is
+          fixed and the zoomed title-block view appears below.
         </p>
         <p style={{ marginBottom: '0.25rem' }}>
-          3. Select a field (Drawing number, Drawing title, Revision, Other)
-          and click on the corresponding text inside the green box. You can
-          re-click to move any point.
+          3. In the zoomed view, select a field (Drawing number, Drawing
+          title, Revision, Other) and click-drag a rectangle around the text.
+          Re-dragging replaces the previous area for that field.
         </p>
         <p style={{ marginBottom: '0.25rem' }}>
           4. When you are happy, click <strong>Save</strong> to write all
@@ -610,6 +714,7 @@ export default function TitleblockAnnotator(
         </p>
       </div>
 
+      {/* Full-page view (title-block only) */}
       <div
         style={{
           position: 'relative',
@@ -623,27 +728,87 @@ export default function TitleblockAnnotator(
       >
         <img
           src={imageUrl}
-          alt="Page preview for title-block annotation"
+          alt="Page preview for title-block selection"
           style={{ display: 'block', maxWidth: '100%', height: 'auto' }}
         />
         <div
-          ref={overlayRef}
-          onMouseDown={handleOverlayMouseDown}
-          onMouseMove={handleOverlayMouseMove}
-          onMouseUp={handleOverlayMouseUp}
-          onMouseLeave={handleOverlayMouseLeave}
+          ref={pageOverlayRef}
+          onMouseDown={handlePageMouseDown}
+          onMouseMove={handlePageMouseMove}
+          onMouseUp={handlePageMouseUp}
+          onMouseLeave={handlePageMouseLeave}
           onClick={handleOverlayClick}
           style={{
             position: 'absolute',
             inset: 0,
-            cursor: 'crosshair',
+            cursor:
+              busy || activeTool !== 'titleblock'
+                ? 'default'
+                : 'crosshair',
           }}
         >
-          {renderOverlayRects()}
-          {renderFieldMarkers()}
+          {renderPageOverlayRects()}
         </div>
       </div>
 
+      {/* Zoomed title-block view for field areas */}
+      {titleblockDefined && titleblock && (
+        <div
+          style={{
+            marginBottom: '0.75rem',
+            padding: '0.5rem',
+            borderRadius: 4,
+            border: '1px solid #e5e7eb',
+            backgroundColor: '#f9fafb',
+          }}
+        >
+          <div
+            style={{
+              marginBottom: '0.3rem',
+              fontSize: '0.85rem',
+              color: '#475569',
+            }}
+          >
+            Zoomed title-block (use this to mark drawing number, title, and
+            revision)
+          </div>
+          <div
+            style={{
+              position: 'relative',
+              display: 'inline-block',
+              borderRadius: 4,
+              overflow: 'hidden',
+            }}
+          >
+            <canvas
+              ref={zoomCanvasRef}
+              style={{
+                display: 'block',
+              }}
+            />
+            <div
+              ref={zoomOverlayRef}
+              onMouseDown={handleZoomMouseDown}
+              onMouseMove={handleZoomMouseMove}
+              onMouseUp={handleZoomMouseUp}
+              onMouseLeave={handleZoomMouseLeave}
+              onClick={handleOverlayClick}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                cursor:
+                  busy || !isFieldTool(activeTool)
+                    ? 'default'
+                    : 'crosshair',
+              }}
+            >
+              {renderZoomOverlayRects()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Controls */}
       <div
         style={{
           display: 'flex',
@@ -656,7 +821,7 @@ export default function TitleblockAnnotator(
         <button
           type="button"
           onClick={() => setActiveTool('titleblock')}
-          disabled={titleblockButtonDisabled || busy}
+          disabled={titleblockButtonDisabled}
           style={{
             padding: '0.3rem 0.7rem',
             borderRadius: 4,
@@ -665,11 +830,10 @@ export default function TitleblockAnnotator(
               !titleblockButtonDisabled && activeTool === 'titleblock'
                 ? '#bbf7d0'
                 : '#22c55e',
-            opacity: busy && !titleblockButtonDisabled ? 0.8 : 1,
+            opacity: titleblockButtonDisabled ? 0.7 : 1,
             color: '#ffffff',
             fontSize: '0.85rem',
-            cursor:
-              titleblockButtonDisabled || busy ? 'default' : 'pointer',
+            cursor: titleblockButtonDisabled ? 'default' : 'pointer',
           }}
         >
           Title-block
@@ -678,19 +842,18 @@ export default function TitleblockAnnotator(
         <button
           type="button"
           onClick={() => setActiveTool('drawing_number')}
-          disabled={otherButtonsDisabled || busy}
+          disabled={fieldButtonsDisabled}
           style={{
             padding: '0.3rem 0.7rem',
             borderRadius: 4,
             border: '1px solid #0f766e',
             backgroundColor:
-              !otherButtonsDisabled && activeTool === 'drawing_number'
+              !fieldButtonsDisabled && activeTool === 'drawing_number'
                 ? '#99f6e4'
                 : '#14b8a6',
             color: '#ffffff',
             fontSize: '0.85rem',
-            cursor:
-              otherButtonsDisabled || busy ? 'default' : 'pointer',
+            cursor: fieldButtonsDisabled ? 'default' : 'pointer',
           }}
         >
           Drawing number
@@ -699,19 +862,18 @@ export default function TitleblockAnnotator(
         <button
           type="button"
           onClick={() => setActiveTool('drawing_title')}
-          disabled={otherButtonsDisabled || busy}
+          disabled={fieldButtonsDisabled}
           style={{
             padding: '0.3rem 0.7rem',
             borderRadius: 4,
             border: '1px solid #4f46e5',
             backgroundColor:
-              !otherButtonsDisabled && activeTool === 'drawing_title'
+              !fieldButtonsDisabled && activeTool === 'drawing_title'
                 ? '#c7d2fe'
                 : '#6366f1',
             color: '#ffffff',
             fontSize: '0.85rem',
-            cursor:
-              otherButtonsDisabled || busy ? 'default' : 'pointer',
+            cursor: fieldButtonsDisabled ? 'default' : 'pointer',
           }}
         >
           Drawing title
@@ -720,19 +882,18 @@ export default function TitleblockAnnotator(
         <button
           type="button"
           onClick={() => setActiveTool('revision')}
-          disabled={otherButtonsDisabled || busy}
+          disabled={fieldButtonsDisabled}
           style={{
             padding: '0.3rem 0.7rem',
             borderRadius: 4,
             border: '1px solid #b45309',
             backgroundColor:
-              !otherButtonsDisabled && activeTool === 'revision'
+              !fieldButtonsDisabled && activeTool === 'revision'
                 ? '#fed7aa'
                 : '#f97316',
             color: '#ffffff',
             fontSize: '0.85rem',
-            cursor:
-              otherButtonsDisabled || busy ? 'default' : 'pointer',
+            cursor: fieldButtonsDisabled ? 'default' : 'pointer',
           }}
         >
           Revision
@@ -741,19 +902,18 @@ export default function TitleblockAnnotator(
         <button
           type="button"
           onClick={() => setActiveTool('other')}
-          disabled={otherButtonsDisabled || busy}
+          disabled={fieldButtonsDisabled}
           style={{
             padding: '0.3rem 0.7rem',
             borderRadius: 4,
             border: '1px solid #6b7280',
             backgroundColor:
-              !otherButtonsDisabled && activeTool === 'other'
+              !fieldButtonsDisabled && activeTool === 'other'
                 ? '#e5e7eb'
                 : '#9ca3af',
             color: '#111827',
             fontSize: '0.85rem',
-            cursor:
-              otherButtonsDisabled || busy ? 'default' : 'pointer',
+            cursor: fieldButtonsDisabled ? 'default' : 'pointer',
           }}
         >
           Other
@@ -762,17 +922,15 @@ export default function TitleblockAnnotator(
         <button
           type="button"
           onClick={handleConfirmTitleblock}
-          disabled={titleblockButtonDisabled || busy}
+          disabled={confirmDisabled}
           style={{
             padding: '0.3rem 0.7rem',
             borderRadius: 4,
             border: '1px solid #15803d',
-            backgroundColor:
-              titleblockButtonDisabled || busy ? '#bbf7d0' : '#16a34a',
+            backgroundColor: confirmDisabled ? '#bbf7d0' : '#16a34a',
             color: '#ffffff',
             fontSize: '0.85rem',
-            cursor:
-              titleblockButtonDisabled || busy ? 'default' : 'pointer',
+            cursor: confirmDisabled ? 'default' : 'pointer',
           }}
         >
           Confirm title-block
@@ -799,17 +957,15 @@ export default function TitleblockAnnotator(
         <button
           type="button"
           onClick={handleSaveAll}
-          disabled={!hasTitleblock || busy}
+          disabled={saveDisabled}
           style={{
             padding: '0.3rem 0.9rem',
             borderRadius: 4,
             border: '1px solid #1d4ed8',
-            backgroundColor:
-              !hasTitleblock || busy ? '#bfdbfe' : '#2563eb',
+            backgroundColor: saveDisabled ? '#bfdbfe' : '#2563eb',
             color: '#ffffff',
             fontSize: '0.85rem',
-            cursor:
-              !hasTitleblock || busy ? 'default' : 'pointer',
+            cursor: saveDisabled ? 'default' : 'pointer',
           }}
         >
           {saving ? 'Saving…' : 'Save'}
