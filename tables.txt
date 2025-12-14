@@ -1,0 +1,677 @@
+[
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 1,
+    "column_name": "id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 2,
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 3,
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 4,
+    "column_name": "enquirynumber",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 5,
+    "column_name": "projectnumber",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 6,
+    "column_name": "scope_ref",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 7,
+    "column_name": "drawing_number",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 8,
+    "column_name": "revision",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 9,
+    "column_name": "original_filename",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 10,
+    "column_name": "file_ext",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 11,
+    "column_name": "storage_bucket",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 12,
+    "column_name": "storage_object_path",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 13,
+    "column_name": "file_size_bytes",
+    "data_type": "bigint",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 14,
+    "column_name": "file_sha256",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 15,
+    "column_name": "file_sha1",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 16,
+    "column_name": "status",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": "'uploaded'::text"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 17,
+    "column_name": "page_count",
+    "data_type": "integer",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 18,
+    "column_name": "processing_error",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 19,
+    "column_name": "is_superseded",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "false"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 20,
+    "column_name": "supersedes_document_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 21,
+    "column_name": "superseded_by_document_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 22,
+    "column_name": "sub_project_item_seq",
+    "data_type": "integer",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 23,
+    "column_name": "doc_kind",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 24,
+    "column_name": "doc_number",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 25,
+    "column_name": "doc_title",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_files",
+    "ordinal_position": 26,
+    "column_name": "doc_revision",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 1,
+    "column_name": "id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 2,
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 3,
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 4,
+    "column_name": "document_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 5,
+    "column_name": "page_number",
+    "data_type": "integer",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 6,
+    "column_name": "image_bucket",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 7,
+    "column_name": "image_object_path",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 8,
+    "column_name": "image_sha256",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 9,
+    "column_name": "ocr_text",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 10,
+    "column_name": "text_hash",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 11,
+    "column_name": "status",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": "'queued'::text"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 12,
+    "column_name": "processing_error",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 13,
+    "column_name": "titleblock_x",
+    "data_type": "double precision",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 14,
+    "column_name": "titleblock_y",
+    "data_type": "double precision",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 15,
+    "column_name": "titleblock_width",
+    "data_type": "double precision",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 16,
+    "column_name": "titleblock_height",
+    "data_type": "double precision",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 17,
+    "column_name": "titleblock_fingerprint",
+    "data_type": "jsonb",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 18,
+    "column_name": "titleblock_fingerprint_version",
+    "data_type": "integer",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 19,
+    "column_name": "drawing_number",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 20,
+    "column_name": "drawing_title",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 21,
+    "column_name": "revision",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 22,
+    "column_name": "matched_titleblock_template_id",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_pages",
+    "ordinal_position": 23,
+    "column_name": "matched_titleblock_confidence",
+    "data_type": "double precision",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_titleblock_templates",
+    "ordinal_position": 1,
+    "column_name": "id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_titleblock_templates",
+    "ordinal_position": 2,
+    "column_name": "name",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_titleblock_templates",
+    "ordinal_position": 3,
+    "column_name": "sample_document_page_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_titleblock_templates",
+    "ordinal_position": 4,
+    "column_name": "template",
+    "data_type": "jsonb",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_titleblock_templates",
+    "ordinal_position": 5,
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "document_titleblock_templates",
+    "ordinal_position": 6,
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register",
+    "ordinal_position": 1,
+    "column_name": "projectnumber",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register",
+    "ordinal_position": 2,
+    "column_name": "client_id",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register",
+    "ordinal_position": 3,
+    "column_name": "created",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register",
+    "ordinal_position": 4,
+    "column_name": "modified",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 1,
+    "column_name": "id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 2,
+    "column_name": "projectnumber",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 3,
+    "column_name": "item_seq",
+    "data_type": "integer",
+    "is_nullable": "YES",
+    "column_default": "1"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 4,
+    "column_name": "line_desc",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 5,
+    "column_name": "value",
+    "data_type": "numeric",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 6,
+    "column_name": "currency",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": "'GBP'::text"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 7,
+    "column_name": "customerponumber",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 8,
+    "column_name": "invoiced",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": "false"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 9,
+    "column_name": "due_date",
+    "data_type": "date",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 10,
+    "column_name": "added_by",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 11,
+    "column_name": "last_change_by",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 12,
+    "column_name": "source_row_hash",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 13,
+    "column_name": "source_row_index",
+    "data_type": "integer",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 14,
+    "column_name": "changed_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 15,
+    "column_name": "created",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "project_register_items",
+    "ordinal_position": 16,
+    "column_name": "modified",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  }
+]
