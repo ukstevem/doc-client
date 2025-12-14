@@ -1,5 +1,7 @@
 'use client';
 
+'use client';
+
 import React, {
   useCallback,
   useEffect,
@@ -9,44 +11,14 @@ import React, {
   ChangeEvent,
 } from 'react';
 
+import type {
+  DocumentSummary,
+  DocumentStatus,
+  AttentionCategory,
+  VersionInfo,
+} from '../lib/documentTypes';
+
 type ViewMode = 'library' | 'pictorial' | 'projects';
-
-type AttentionCategory = 'clean' | 'needs_attention';
-
-type DocumentStatus =
-  | 'clean'
-  | 'needs_attention'
-  | 'unmatched'
-  | 'revision_check'
-  | 'pending'
-  | 'error'
-  | 'other';
-
-type VersionInfo = {
-  id: string;
-  revision: string | null;
-  uploadDate: string;
-  status: string;
-};
-
-type DocumentSummary = {
-  id: string;
-  projectOrEnquiry: string;
-  drawingOrDocNumber: string;
-  title: string;
-  revision: string | null;
-  pages: number;
-  status: DocumentStatus;
-  attentionCategory: AttentionCategory;
-  uploadDate?: string;
-  originalFilename?: string;
-  nasPath?: string;
-  sizeLabel?: string;
-  thumbnailUrl?: string | null;
-  pdfUrl?: string | null;
-  versionHistory?: VersionInfo[];
-};
-
 
 export default function DashboardPage() {
   const [view, setView] = useState<ViewMode>('library');
