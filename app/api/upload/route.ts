@@ -1,296 +1,184 @@
 // app/api/upload/route.ts
-
 import { NextResponse } from 'next/server';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { promises as fs } from 'fs';
+import crypto from 'crypto';
 import path from 'path';
-import { randomUUID } from 'crypto';
+import { promises as fs } from 'fs';
 
 export const runtime = 'nodejs';
 
 type ContextType = 'project' | 'enquiry';
 
-interface UploadContext {
-  contextType: ContextType;
-  projectNumber: string;
-  enquiryNumber: string;
-}
-
-interface FileResult {
-  filename: string;
-  size: number;
-  type: string;
-  storagePath: string | null;
-  error?: string;
-}
-
-/* --------- Small helpers --------- */
-
 function readEnv(name: string): string {
   const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing environment variable: ${name}`);
-  }
+  if (!value) throw new Error(`Missing environment variable: ${name}`);
   return value;
 }
 
-function createSupabaseClient(): SupabaseClient {
+function createSupabaseServerClient(): SupabaseClient {
+  // Mirrors what you're already doing elsewhere (SUPABASE_SECRET_KEY). :contentReference[oaicite:4]{index=4}
   const url = readEnv('SUPABASE_URL');
   const key = readEnv('SUPABASE_SECRET_KEY');
-  return createClient(url, key, {
-    auth: { persistSession: false },
-  });
+  return createClient(url, key, { auth: { persistSession: false } });
 }
 
-function getNasRoot(): string {
-  return readEnv('DOC_NAS_ROOT');
-}
-
-function parseContext(formData: FormData): UploadContext {
-  const rawType = (formData.get('contextType') as string) || 'project';
-  const contextType: ContextType =
-    rawType === 'enquiry' ? 'enquiry' : 'project';
-
-  const projectNumber = ((formData.get('projectNumber') as string) || '').trim();
-  const enquiryNumber = ((formData.get('enquiryNumber') as string) || '').trim();
-
-  if (contextType === 'project' && !projectNumber) {
-    throw new Error('projectNumber is required when contextType=project');
-  }
-
-  if (contextType === 'enquiry' && !enquiryNumber) {
-    throw new Error('enquiryNumber is required when contextType=enquiry');
-  }
-
-  return { contextType, projectNumber, enquiryNumber };
-}
-
-function getFilesFromForm(formData: FormData): File[] {
-  const all = formData.getAll('files');
-  const files = all.filter((item) => item instanceof File) as File[];
-  return files;
-}
-
-function splitName(name: string): { root: string; ext: string | null } {
-  const idx = name.lastIndexOf('.');
-  if (idx <= 0 || idx === name.length - 1) {
-    // no dot, or dot at start/end → treat as no extension
-    return { root: name, ext: null };
-  }
-  return {
-    root: name.slice(0, idx),
-    ext: name.slice(idx + 1).toLowerCase(),
-  };
-}
-
-function sanitiseRootName(root: string): string {
-  const trimmed = root.trim().toLowerCase();
-  const replaced = trimmed.replace(/\s+/g, '_');
-  const cleaned = replaced.replace(/[^a-z0-9_]/g, '');
-  return cleaned || 'unnamed';
-}
-
-function safeContextValue(value: string): string {
-  // Keep it simple: trim and replace spaces with underscore.
-  // The schema expects project/enquiry numbers like "10001" or "ENQ-1234".
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return 'unassigned';
-  }
-  return trimmed.replace(/\s+/g, '_');
-}
-
-/**
- * Build raw storage path and id based on the design:
- *
- * raw/enquiries/{enquirynumber}/{document_file_id}_{sanitised-root}.{ext}
- * raw/projects/{projectnumber}/{document_file_id}_{sanitised-root}.{ext}
- */
-function buildRawStoragePath(
-  ctx: UploadContext,
-  originalName: string,
-): { id: string; storagePath: string } {
-  const id = randomUUID();
-  const { root, ext } = splitName(originalName || 'unnamed');
-  const safeRoot = sanitiseRootName(root);
-  const extPart = ext ? `.${ext}` : '.pdf';
-
-  const contextValue =
-    ctx.contextType === 'project'
-      ? safeContextValue(ctx.projectNumber)
-      : safeContextValue(ctx.enquiryNumber);
-
-  const dirPrefix =
-    ctx.contextType === 'project'
-      ? `raw/projects/${contextValue}`
-      : `raw/enquiries/${contextValue}`;
-
-  const filename = `${id}_${safeRoot}${extPart}`;
-  const storagePath = path.posix.join(dirPrefix, filename);
-
-  return { id, storagePath };
-}
-
-async function writeFileToNas(
-  nasRoot: string,
-  storagePath: string,
-  file: File,
-): Promise<void> {
-  const absolutePath = path.join(nasRoot, storagePath);
-  const directory = path.dirname(absolutePath);
-
-  await fs.mkdir(directory, { recursive: true });
-
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-
-  await fs.writeFile(absolutePath, buffer);
-}
-
-async function insertDocumentFileRowWithId(
-  supabase: SupabaseClient,
-  ctx: UploadContext,
-  id: string,
-  filename: string,
-  size: number,
-  storagePath: string,
-): Promise<string | null> {
-  const { ext } = splitName(filename);
-
-  const insertPayload = {
-    id, // explicit UUID
-
-    // Linking
-    enquirynumber:
-      ctx.contextType === 'enquiry' ? ctx.enquiryNumber || null : null,
-    projectnumber:
-      ctx.contextType === 'project' ? ctx.projectNumber || null : null,
-    scope_ref: null,
-    sub_project_item_seq: null,
-    drawing_number: null,
-    revision: null,
-
-    // File / storage info
-    original_filename: filename,
-    file_ext: ext,
-    storage_bucket: 'nas',
-    storage_object_path: storagePath,
-    file_size_bytes: size,
-
-    // Hashes (worker will fill later if needed)
-    file_sha256: null,
-    file_sha1: null,
-
-    // Processing state
-    status: 'uploaded',
-    page_count: null,
-    processing_error: null,
-  };
-
-  const { error } = await supabase
-    .from('document_files')
-    .insert(insertPayload);
-
-  if (error) {
-    return error.message;
-  }
-  return null;
-}
-
-async function handleOneFile(
-  supabase: SupabaseClient,
-  nasRoot: string,
-  ctx: UploadContext,
-  file: File,
-): Promise<FileResult> {
-  const filename = file.name || 'unnamed';
-  const size = file.size;
-  const type = file.type || 'application/pdf';
-
-  const { id, storagePath } = buildRawStoragePath(ctx, filename);
-
-  try {
-    await writeFileToNas(nasRoot, storagePath, file);
-  } catch (err) {
-    const msg =
-      err instanceof Error ? err.message : 'Unknown error writing to NAS';
-    return {
-      filename,
-      size,
-      type,
-      storagePath: null,
-      error: `NAS write failed: ${msg}`,
-    };
-  }
-
-  const insertError = await insertDocumentFileRowWithId(
-    supabase,
-    ctx,
-    id,
-    filename,
-    size,
-    storagePath,
+function getRootDir(): string {
+  // Next container should see the same mounted root as workers; fallback for dev.
+  return (
+    process.env.DOC_NAS_ROOT ||
+    process.env.HOST_DOC_ROOT ||
+    '/data/input'
   );
-
-  if (insertError) {
-    return {
-      filename,
-      size,
-      type,
-      storagePath,
-      error: `DB insert failed: ${insertError}`,
-    };
-  }
-
-  return {
-    filename,
-    size,
-    type,
-    storagePath,
-  };
 }
 
-/* --------- Request handler --------- */
+function sanitizeFilename(name: string): string {
+  const base = path.basename(name);
+  return base.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_');
+}
 
-export async function POST(request: Request) {
+function getFormText(fd: FormData, ...keys: string[]): string {
+  for (const k of keys) {
+    const v = fd.get(k);
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return '';
+}
+
+function isPdf(file: File): boolean {
+  const name = file.name.toLowerCase();
+  return (
+    file.type === 'application/pdf' ||
+    name.endsWith('.pdf')
+  );
+}
+
+function sha256(buf: Buffer): string {
+  return crypto.createHash('sha256').update(buf).digest('hex');
+}
+
+export async function POST(req: Request) {
   try {
-    const formData = await request.formData();
-    const ctx = parseContext(formData);
-    const files = getFilesFromForm(formData);
+    const fd = await req.formData();
 
-    if (files.length === 0) {
+    const contextTypeRaw = getFormText(fd, 'contextType');
+    const contextType = contextTypeRaw === 'project' || contextTypeRaw === 'enquiry'
+      ? (contextTypeRaw as ContextType)
+      : null;
+
+    if (!contextType) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: 'No files found in request.',
-        },
+        { ok: false, error: 'Missing/invalid contextType (project|enquiry).' },
         { status: 400 },
       );
     }
 
-    const supabase = createSupabaseClient();
-    const nasRoot = getNasRoot();
+    // Accept both camelCase (current UI) and snake_case (DB-ish) keys.
+    const projectNumber = getFormText(fd, 'projectNumber', 'projectnumber');
+    const enquiryNumber = getFormText(fd, 'enquiryNumber', 'enquirynumber');
 
-    const results: FileResult[] = [];
-    for (let i = 0; i < files.length; i += 1) {
-      const file = files[i];
-      const result = await handleOneFile(supabase, nasRoot, ctx, file);
-      results.push(result);
+    if (contextType === 'project' && !projectNumber) {
+      return NextResponse.json(
+        { ok: false, error: 'Please provide a project number.' },
+        { status: 400 },
+      );
+    }
+    if (contextType === 'enquiry' && !enquiryNumber) {
+      return NextResponse.json(
+        { ok: false, error: 'Please provide an enquiry number.' },
+        { status: 400 },
+      );
     }
 
-    return NextResponse.json({
-      ok: true,
-      contextType: ctx.contextType,
-      projectNumber: ctx.projectNumber,
-      enquiryNumber: ctx.enquiryNumber,
-      files: results,
-    });
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Unknown server error';
-    console.error('Error in /api/upload:', error);
-    return NextResponse.json(
-      { ok: false, error: msg },
-      { status: 500 },
-    );
+    const files = fd.getAll('files').filter((f): f is File => f instanceof File);
+    if (files.length === 0) {
+      return NextResponse.json(
+        { ok: false, error: 'Please select at least one PDF.' },
+        { status: 400 },
+      );
+    }
+
+    const sb = createSupabaseServerClient();
+    const root = getRootDir();
+
+    const results: Array<{
+      filename: string;
+      size: number;
+      type: string;
+      storagePath: string | null;
+      error?: string;
+    }> = [];
+
+    for (const file of files) {
+      const safeName = sanitizeFilename(file.name);
+      const size = file.size ?? 0;
+      const type = file.type ?? '';
+
+      try {
+        if (!isPdf(file)) {
+          throw new Error('Only PDF files are allowed.');
+        }
+
+        const documentId = crypto.randomUUID();
+
+        // Store under enquiries/<enq>/... or projects/<proj>/...
+        const relDir =
+          contextType === 'enquiry'
+            ? path.posix.join('enquiries', enquiryNumber)
+            : path.posix.join('projects', projectNumber);
+
+        const relPath = path.posix.join(relDir, `${documentId}_${safeName}`);
+        const absPath = path.join(root, relPath);
+
+        await fs.mkdir(path.dirname(absPath), { recursive: true });
+
+        const bytes = Buffer.from(await file.arrayBuffer());
+        await fs.writeFile(absPath, bytes);
+
+        const hash = sha256(bytes);
+        const ext = path.extname(safeName).replace('.', '').toLowerCase() || 'pdf';
+
+        const ins = await sb
+          .from('document_files')
+          .insert({
+            id: documentId,
+            enquirynumber: contextType === 'enquiry' ? enquiryNumber : null,
+            projectnumber: contextType === 'project' ? projectNumber : null,
+            original_filename: safeName,
+            file_ext: ext,
+            storage_bucket: 'nas',
+            storage_object_path: relPath,
+            file_size_bytes: bytes.length,
+            file_sha256: hash,
+            // status has a DB default of 'uploaded' anyway. :contentReference[oaicite:5]{index=5}
+            status: 'uploaded',
+            processing_error: null,
+          })
+          .select('id')
+          .single();
+
+        if (ins.error) throw new Error(ins.error.message);
+
+        results.push({
+          filename: safeName,
+          size: bytes.length,
+          type,
+          storagePath: relPath,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Unknown error';
+        results.push({
+          filename: safeName,
+          size,
+          type,
+          storagePath: null,
+          error: msg,
+        });
+      }
+    }
+
+    return NextResponse.json({ ok: true, files: results });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Unexpected error';
+    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }

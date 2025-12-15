@@ -1,62 +1,63 @@
 // app/api/blob/route.ts
-import { NextResponse } from 'next/server';
-import { promises as fs } from 'fs';
-import path from 'path';
+import { NextRequest, NextResponse } from 'next/server';
+import path from 'node:path';
+import { promises as fs } from 'node:fs';
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const relPath = url.searchParams.get('path');
+
+  if (!relPath) {
+    return NextResponse.json({ error: 'Missing path' }, { status: 400 });
+  }
+
+  // Use the same root the containers are configured with
+  const root =
+    process.env.DOC_NAS_ROOT || // preferred for your setup
+    process.env.HOST_DOC_ROOT || // fallback if you ever rename it
+    '/data/cad_iot'; // sensible default for doc-client
+
+  if (!root) {
+    console.error('No DOC_NAS_ROOT / HOST_DOC_ROOT configured in doc-client');
+    return NextResponse.json(
+      { error: 'Server not configured for blobs' },
+      { status: 500 },
+    );
+  }
+
+  // Normalise and prevent path traversal
+  const cleanRel = relPath.replace(/^[/\\]+/, '');
+  const absPath = path.join(root, cleanRel);
+  const normalizedRoot = path.resolve(root);
+  const normalizedAbs = path.resolve(absPath);
+
+  if (!normalizedAbs.startsWith(normalizedRoot)) {
+    console.warn('Blocked invalid blob path', { relPath, absPath });
+    return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
+  }
+
   try {
-    const url = new URL(req.url);
-    const relPath = url.searchParams.get('path');
-
-    if (!relPath) {
-      return NextResponse.json(
-        { error: 'Missing path query parameter' },
-        { status: 400 }
-      );
-    }
-
-    const root = process.env.HOST_DOC_ROOT;
-    if (!root) {
-      console.error('HOST_DOC_ROOT is not set');
-      return NextResponse.json(
-        { error: 'HOST_DOC_ROOT not configured on server' },
-        { status: 500 }
-      );
-    }
-
-    // Make sure path stays under HOST_DOC_ROOT
-    const safeRel = relPath.replace(/^[/\\]+/, '');
-    const fullPath = path.join(root, safeRel);
-    const normalizedRoot = path.resolve(root);
-    const normalizedFull = path.resolve(fullPath);
-
-    if (
-      !normalizedFull.startsWith(normalizedRoot) ||
-      normalizedFull === normalizedRoot
-    ) {
-      console.warn('Rejected path traversal attempt:', relPath);
-      return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
-    }
-
-    const data = await fs.readFile(fullPath);
+    const data = await fs.readFile(normalizedAbs);
+    const ext = path.extname(cleanRel).toLowerCase();
 
     let contentType = 'application/octet-stream';
-    const lower = fullPath.toLowerCase();
-    if (lower.endsWith('.png')) contentType = 'image/png';
-    else if (lower.endsWith('.jpg') || lower.endsWith('.jpeg'))
-      contentType = 'image/jpeg';
-    else if (lower.endsWith('.webp')) contentType = 'image/webp';
-    else if (lower.endsWith('.pdf')) contentType = 'application/pdf';
+    if (ext === '.png') contentType = 'image/png';
+    else if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
+    else if (ext === '.webp') contentType = 'image/webp';
+    else if (ext === '.pdf') contentType = 'application/pdf';
 
     return new NextResponse(data, {
       status: 200,
       headers: {
         'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=3600',
+        'Cache-Control': 'public, max-age=86400',
       },
     });
   } catch (err) {
-    console.error('Error in /api/blob:', err);
-    return NextResponse.json({ error: 'File not found' }, { status: 404 });
+    console.error('Blob read error', {
+      absPath,
+      error: (err as any)?.message ?? String(err),
+    });
+    return NextResponse.json({ error: 'file not found' }, { status: 404 });
   }
 }

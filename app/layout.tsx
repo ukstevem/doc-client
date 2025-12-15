@@ -107,28 +107,6 @@ export default function RootLayout(props: RootLayoutProps) {
                   </Link>
                 </li>
               </ul>
-
-              <div
-                style={{
-                  fontSize: '0.75rem',
-                  fontWeight: 600,
-                  color: '#64748b',
-                  padding: '0.75rem 0.4rem 0.25rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.03em',
-                }}
-              >
-                Purchase orders
-              </div>
-              <div
-                style={{
-                  padding: '0.35rem 0.5rem',
-                  fontSize: '0.8rem',
-                  color: '#94a3b8',
-                }}
-              >
-                (future)
-              </div>
             </nav>
           </aside>
 

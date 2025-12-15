@@ -1,7 +1,5 @@
 'use client';
 
-'use client';
-
 import React, {
   useCallback,
   useEffect,
@@ -11,264 +9,45 @@ import React, {
   ChangeEvent,
 } from 'react';
 
-import type {
-  DocumentSummary,
-  DocumentStatus,
-  AttentionCategory,
-  VersionInfo,
-} from '../lib/documentTypes';
-
 type ViewMode = 'library' | 'pictorial' | 'projects';
 
-export default function DashboardPage() {
-  const [view, setView] = useState<ViewMode>('library');
+type DocumentStatus =
+  | 'clean'
+  | 'needs_attention'
+  | 'unmatched'
+  | 'revision_check'
+  | 'pending'
+  | 'error'
+  | 'other';
 
-  const [documents, setDocuments] = useState<DocumentSummary[]>([]);
-  const [selectedDoc, setSelectedDoc] = useState<DocumentSummary | null>(null);
+type AttentionCategory = 'clean' | 'needs_attention';
 
-  const [filterProject, setFilterProject] = useState<string>('');
-  const [filterText, setFilterText] = useState<string>('');
-
-  const [projectFilterForProjectsView, setProjectFilterForProjectsView] =
-    useState<string>('');
-
-  // Load list of documents once; UI filters are client-side
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      try {
-        const res = await fetch('/api/documents');
-        if (!res.ok) {
-          console.error('Failed to fetch documents:', res.statusText);
-          return;
-        }
-        const body = (await res.json()) as { documents?: DocumentSummary[] };
-        if (cancelled) return;
-        const docs = body.documents ?? [];
-        setDocuments(docs);
-        if (docs.length > 0 && !selectedDoc) {
-          setSelectedDoc(docs[0]);
-        }
-      } catch (err) {
-        console.error('Error fetching documents:', err);
-      }
-    }
-
-    load();
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleSelectDoc = useCallback((doc: DocumentSummary) => {
-    // Optimistic selection
-    setSelectedDoc(doc);
-
-    // Fetch detail + version history
-    (async () => {
-      try {
-        const res = await fetch(`/api/documents/${doc.id}`);
-        if (!res.ok) {
-          console.error('Failed to fetch document detail:', res.statusText);
-          return;
-        }
-        const body = (await res.json()) as {
-          document: DocumentSummary;
-          history: VersionInfo[];
-        };
-
-        setSelectedDoc((prev) => {
-          if (!prev || prev.id !== doc.id) {
-            return prev;
-          }
-          return {
-            ...prev,
-            ...body.document,
-            versionHistory: body.history,
-          };
-        });
-      } catch (err) {
-        console.error('Error fetching document detail:', err);
-      }
-    })();
-  }, []);
-
-  const handleTagTemplate = useCallback((doc: DocumentSummary) => {
-    // TODO: plug into your tagging route
-    // e.g. router.push(`/tag/page/${doc.id}`);
-    console.log('Tag template for document:', doc.id);
-  }, []);
-
-  const handleUpload = useCallback(
-    async (
-      files: File[],
-      meta: { type: 'project' | 'enquiry'; value: string }
-    ) => {
-      // TODO: wire this to your real upload endpoint
-      console.log('Uploading files', {
-        count: files.length,
-        meta,
-      });
-    },
-    []
-  );
-
-  const projectOptions = useMemo(() => {
-    const set = new Set<string>();
-    documents.forEach((d) => {
-      if (d.projectOrEnquiry) {
-        set.add(d.projectOrEnquiry);
-      }
-    });
-    return Array.from(set).sort();
-  }, [documents]);
-
-  return (
-    <div className="flex h-screen flex-col">
-      {/* Header */}
-      <header className="border-b px-4 py-2 flex items-center gap-4">
-        <div className="font-semibold text-lg">Doc Control</div>
-
-        <ViewTabs current={view} onChange={setView} />
-
-        <div className="flex-1" />
-
-        <UploadBar onUpload={handleUpload} />
-      </header>
-
-      {/* Filters row */}
-      <div className="border-b px-4 py-2 flex items-center gap-4">
-        {view !== 'projects' && (
-          <>
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-700">
-                Project / Enquiry
-              </label>
-              <select
-                className="border rounded px-2 py-1 text-sm"
-                value={filterProject}
-                onChange={(e) => setFilterProject(e.target.value)}
-              >
-                <option value="">All</option>
-                {projectOptions.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-700">
-                Drawing / Doc number
-              </label>
-              <input
-                className="border rounded px-2 py-1 text-sm"
-                value={filterText}
-                onChange={(e) => setFilterText(e.target.value)}
-                placeholder="Filter by number…"
-              />
-            </div>
-          </>
-        )}
-
-        {view === 'projects' && (
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-700">Project / Enquiry</label>
-            <select
-              className="border rounded px-2 py-1 text-sm"
-              value={projectFilterForProjectsView}
-              onChange={(e) => setProjectFilterForProjectsView(e.target.value)}
-            >
-              <option value="">Select…</option>
-              {projectOptions.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-      </div>
-
-      {/* Main area: left view + right detail */}
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 overflow-auto border-r">
-          {view === 'library' && (
-            <LibraryView
-              documents={documents}
-              filterProject={filterProject}
-              filterText={filterText}
-              onSelect={handleSelectDoc}
-              onTagTemplate={handleTagTemplate}
-            />
-          )}
-
-          {view === 'pictorial' && (
-            <PictorialView
-              documents={documents}
-              filterProject={filterProject}
-              filterText={filterText}
-              onSelect={handleSelectDoc}
-              onTagTemplate={handleTagTemplate}
-            />
-          )}
-
-          {view === 'projects' && (
-            <ProjectView
-              documents={documents}
-              selectedProjectOrEnquiry={projectFilterForProjectsView}
-              onSelect={handleSelectDoc}
-              onTagTemplate={handleTagTemplate}
-            />
-          )}
-        </div>
-
-        <div className="w-96 flex-shrink-0 overflow-auto">
-          <DetailPanel document={selectedDoc} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-type ViewTabsProps = {
-  current: ViewMode;
-  onChange: (view: ViewMode) => void;
+type VersionInfo = {
+  id: string;
+  revision: string | null;
+  uploadDate: string;
+  status: string;
 };
 
-function ViewTabs({ current, onChange }: ViewTabsProps) {
-  const options: { id: ViewMode; label: string }[] = [
-    { id: 'library', label: 'Library' },
-    { id: 'pictorial', label: 'Pictorial' },
-    { id: 'projects', label: 'Projects' },
-  ];
+type DocumentSummary = {
+  id: string;
+  projectOrEnquiry: string;
+  drawingOrDocNumber: string;
+  title: string;
+  revision: string | null;
+  pages: number;
+  status: DocumentStatus;
+  attentionCategory: AttentionCategory;
+  uploadDate?: string;
+  originalFilename?: string;
+  nasPath?: string;
+  sizeLabel?: string;
+  thumbnailUrl?: string | null;
+  pdfUrl?: string | null;
+  versionHistory?: VersionInfo[];
+};
 
-  return (
-    <nav className="flex gap-1">
-      {options.map((opt) => {
-        const isActive = opt.id === current;
-        return (
-          <button
-            key={opt.id}
-            type="button"
-            className={
-              'px-3 py-1 rounded text-sm border ' +
-              (isActive
-                ? 'bg-blue-600 text-white border-blue-600'
-                : 'bg-white text-gray-800 hover:bg-gray-100')
-            }
-            onClick={() => onChange(opt.id)}
-          >
-            {opt.label}
-          </button>
-        );
-      })}
-    </nav>
-  );
-}
+// ---------------- Upload bar ----------------
 
 type UploadBarProps = {
   onUpload: (
@@ -277,212 +56,96 @@ type UploadBarProps = {
   ) => Promise<void> | void;
 };
 
-type UploadMetaState =
-  | { stage: 'idle' }
-  | { stage: 'askingMeta'; files: File[] }
-  | {
-      stage: 'readyToUpload';
-      files: File[];
-      mode: 'project' | 'enquiry';
-      value: string;
-    };
-
 function UploadBar({ onUpload }: UploadBarProps) {
   const [dragActive, setDragActive] = useState(false);
-  const [metaState, setMetaState] = useState<UploadMetaState>({ stage: 'idle' });
-  const [isUploading, setIsUploading] = useState(false);
-
-  const reset = useCallback(() => {
-    setMetaState({ stage: 'idle' });
-    setIsUploading(false);
-  }, []);
 
   const handleFilesSelected = useCallback(
     (filesList: FileList | null) => {
-      if (!filesList || filesList.length === 0) {
-        return;
-      }
+      if (!filesList || filesList.length === 0) return;
       const files = Array.from(filesList);
-      setMetaState({ stage: 'askingMeta', files });
+
+      const value = window.prompt(
+        'Enter project or enquiry number for these files:'
+      );
+      if (!value || !value.trim()) return;
+
+      // For now, treat everything as "project"; we can add a toggle later
+      onUpload(files, { type: 'project', value: value.trim() });
     },
-    []
+    [onUpload]
   );
 
-  const handleDrop = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
+  const onDrop = useCallback(
+    (e: DragEvent<HTMLElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
       setDragActive(false);
 
-      if (event.dataTransfer.files && event.dataTransfer.files.length > 0) {
-        handleFilesSelected(event.dataTransfer.files);
-        event.dataTransfer.clearData();
-      }
+      const filesList = e.dataTransfer.files;
+      handleFilesSelected(filesList);
     },
     [handleFilesSelected]
   );
 
-  const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (!dragActive) {
-      setDragActive(true);
-    }
-  }, [dragActive]);
-
-  const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (dragActive) {
-      setDragActive(false);
-    }
-  }, [dragActive]);
-
-  const handleMetaConfirm = useCallback(
-    (mode: 'project' | 'enquiry', value: string) => {
-      if (!value.trim()) {
-        return;
-      }
-      if (metaState.stage !== 'askingMeta') {
-        return;
-      }
-      setMetaState({
-        stage: 'readyToUpload',
-        files: metaState.files,
-        mode,
-        value: value.trim(),
-      });
+  const onDragOver = useCallback(
+    (e: DragEvent<HTMLElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!dragActive) setDragActive(true);
     },
-    [metaState]
+    [dragActive]
   );
 
-  const handleStartUpload = useCallback(async () => {
-    if (metaState.stage !== 'readyToUpload') {
-      return;
-    }
-    try {
-      setIsUploading(true);
-      await onUpload(metaState.files, {
-        type: metaState.mode,
-        value: metaState.value,
-      });
-    } finally {
-      reset();
-    }
-  }, [metaState, onUpload, reset]);
+  const onDragLeave = useCallback((e: DragEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+  }, []);
 
-  const filesCount =
-    metaState.stage === 'idle'
-      ? 0
-      : metaState.stage === 'askingMeta'
-      ? metaState.files.length
-      : metaState.files.length;
+  const onFileInputChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      handleFilesSelected(e.target.files);
+      e.target.value = '';
+    },
+    [handleFilesSelected]
+  );
 
   return (
-    <div
-      className={
-        'border rounded px-3 py-1 text-xs flex items-center gap-2 ' +
-        (dragActive ? 'bg-blue-50 border-blue-400' : 'bg-white')
-      }
-      onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-    >
-      <label className="cursor-pointer text-xs font-medium">
-        <span className="underline">Browse</span> or drop files
+    <div className="flex items-center gap-3">
+      <label
+        className={`border rounded px-3 py-1 text-xs cursor-pointer ${
+          dragActive ? 'bg-blue-50 border-blue-400' : 'bg-white'
+        }`}
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+      >
+        <span className="font-medium">Upload</span>
+        <span className="ml-2 text-[11px] text-gray-500">
+          Drag &amp; drop or click
+        </span>
         <input
           type="file"
           multiple
           className="hidden"
-          onChange={(e: ChangeEvent<HTMLInputElement>) =>
-            handleFilesSelected(e.target.files)
-          }
+          onChange={onFileInputChange}
+          accept=".pdf,.PDF"
         />
       </label>
-
-      {filesCount > 0 && (
-        <span className="text-gray-700">
-          {filesCount} file{filesCount === 1 ? '' : 's'} selected
-        </span>
-      )}
-
-      {metaState.stage === 'idle' && filesCount === 0 && (
-        <span className="text-gray-400">(Upload available from any view)</span>
-      )}
-
-      {metaState.stage === 'askingMeta' && (
-        <UploadMetaPrompt files={metaState.files} onConfirm={handleMetaConfirm} />
-      )}
-
-      {metaState.stage === 'readyToUpload' && (
-        <button
-          type="button"
-          className="ml-2 px-2 py-1 border rounded bg-blue-600 text-white disabled:opacity-60"
-          disabled={isUploading}
-          onClick={handleStartUpload}
-        >
-          {isUploading ? 'Uploading…' : 'Process'}
-        </button>
-      )}
-
-      {metaState.stage !== 'idle' && (
-        <button
-          type="button"
-          className="ml-1 px-2 py-1 border rounded text-gray-600 text-xs"
-          onClick={reset}
-        >
-          Cancel
-        </button>
-      )}
-    </div>
-  );
-}
-
-type UploadMetaPromptProps = {
-  files: File[];
-  onConfirm: (mode: 'project' | 'enquiry', value: string) => void;
-};
-
-function UploadMetaPrompt({ files, onConfirm }: UploadMetaPromptProps) {
-  const [mode, setMode] = useState<'project' | 'enquiry'>('enquiry');
-  const [value, setValue] = useState('');
-
-  return (
-    <div className="flex items-center gap-2 ml-3">
-      <span className="text-gray-700">
-        Process {files.length} file{files.length === 1 ? '' : 's'} as
+      <span className="text-[11px] text-gray-500">
+        Files will be processed by the PDF worker.
       </span>
-      <select
-        className="border rounded px-1 py-0.5 text-xs"
-        value={mode}
-        onChange={(e) =>
-          setMode(e.target.value === 'project' ? 'project' : 'enquiry')
-        }
-      >
-        <option value="enquiry">Enquiry</option>
-        <option value="project">Project</option>
-      </select>
-      <input
-        className="border rounded px-2 py-0.5 text-xs"
-        placeholder={mode === 'project' ? 'Project number' : 'Enquiry number'}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-      />
-      <button
-        type="button"
-        className="px-2 py-0.5 border rounded bg-gray-100 text-xs"
-        onClick={() => onConfirm(mode, value)}
-      >
-        Set
-      </button>
     </div>
   );
 }
+
+// ---------------- Library view ----------------
 
 type LibraryViewProps = {
   documents: DocumentSummary[];
   filterProject: string;
   filterText: string;
+  selectedId: string | null;
   onSelect: (doc: DocumentSummary) => void;
   onTagTemplate: (doc: DocumentSummary) => void;
 };
@@ -491,100 +154,100 @@ function LibraryView({
   documents,
   filterProject,
   filterText,
+  selectedId,
   onSelect,
   onTagTemplate,
 }: LibraryViewProps) {
-  const filtered = useMemo(() => {
-    return documents.filter((doc) => {
-      if (filterProject && doc.projectOrEnquiry !== filterProject) {
-        return false;
-      }
-      if (
-        filterText &&
-        !doc.drawingOrDocNumber.toLowerCase().includes(filterText.toLowerCase())
-      ) {
-        return false;
-      }
-      return true;
-    });
-  }, [documents, filterProject, filterText]);
+  const filtered = useMemo(
+    () =>
+      documents.filter((doc) => {
+        if (filterProject && doc.projectOrEnquiry !== filterProject) return false;
+        if (
+          filterText &&
+          !doc.drawingOrDocNumber
+            .toLowerCase()
+            .includes(filterText.toLowerCase())
+        ) {
+          return false;
+        }
+        return true;
+      }),
+    [documents, filterProject, filterText]
+  );
 
   return (
-    <div className="p-4">
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b bg-gray-50">
-            <th className="text-left px-2 py-1">Project / Enquiry</th>
-            <th className="text-left px-2 py-1">Drawing / Doc number</th>
-            <th className="text-left px-2 py-1">Title</th>
-            <th className="text-left px-2 py-1">Rev</th>
-            <th className="text-left px-2 py-1">Pages</th>
-            <th className="text-left px-2 py-1">Status</th>
-            <th className="text-left px-2 py-1">Size</th>
-            <th className="text-left px-2 py-1">NAS Path</th>
+    <div className="flex-1 overflow-auto">
+      <table className="min-w-full text-xs border-collapse">
+        <thead className="bg-gray-50 border-b text-[11px] uppercase tracking-wide text-gray-600">
+          <tr>
+            <th className="text-left px-2 py-1 border-r">Project / Enquiry</th>
+            <th className="text-left px-2 py-1 border-r">Number</th>
+            <th className="text-left px-2 py-1 border-r">Title</th>
+            <th className="text-left px-2 py-1 border-r">Rev</th>
+            <th className="text-left px-2 py-1 border-r">Pages</th>
+            <th className="text-left px-2 py-1 border-r">Status</th>
             <th className="text-left px-2 py-1">Actions</th>
           </tr>
         </thead>
         <tbody>
           {filtered.map((doc) => {
-            const isAttention = doc.attentionCategory === 'needs_attention';
+            const isSelected = doc.id === selectedId;
             return (
               <tr
                 key={doc.id}
                 className={
-                  'border-b cursor-pointer hover:bg-gray-50 ' +
-                  (isAttention ? 'bg-yellow-50' : '')
+                  'border-b cursor-pointer ' +
+                  (isSelected ? 'bg-blue-100' : 'hover:bg-blue-50')
                 }
                 onClick={() => onSelect(doc)}
               >
-                <td className="px-2 py-1 whitespace-nowrap">
+                <td className="px-2 py-1 align-top">
                   {doc.projectOrEnquiry}
                 </td>
-                <td className="px-2 py-1 whitespace-nowrap">
+                <td className="px-2 py-1 align-top font-mono">
                   {doc.drawingOrDocNumber}
                 </td>
-                <td className="px-2 py-1">{doc.title}</td>
-                <td className="px-2 py-1 whitespace-nowrap">
+                <td className="px-2 py-1 align-top">{doc.title}</td>
+                <td className="px-2 py-1 align-top">
                   {doc.revision ?? '-'}
                 </td>
-                <td className="px-2 py-1 text-center">{doc.pages}</td>
-                <td className="px-2 py-1 whitespace-nowrap">
-                  <StatusChip status={doc.status} />
+                <td className="px-2 py-1 align-top text-center">
+                  {doc.pages}
                 </td>
-                <td className="px-2 py-1 whitespace-nowrap">
-                  {doc.sizeLabel ?? '-'}
+                <td className="px-2 py-1 align-top">
+                  <StatusBadge status={doc.status} />
                 </td>
-                <td className="px-2 py-1 text-xs truncate max-w-[240px]">
-                  {doc.nasPath ?? ''}
-                </td>
-                <td
-                  className="px-2 py-1 whitespace-nowrap"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {doc.attentionCategory === 'needs_attention' && (
-                    <button
-                      type="button"
-                      className="mr-2 px-2 py-0.5 border rounded text-xs"
-                      onClick={() => onTagTemplate(doc)}
-                    >
-                      Tag
-                    </button>
-                  )}
+                <td className="px-2 py-1 align-top">
                   <button
                     type="button"
-                    className="px-2 py-0.5 border rounded text-xs"
-                    onClick={() => onSelect(doc)}
+                    className="text-[11px] px-2 py-0.5 border rounded mr-2"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelect(doc);
+                    }}
                   >
                     Details
+                  </button>
+                  <button
+                    type="button"
+                    className="text-[11px] px-2 py-0.5 border rounded"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTagTemplate(doc);
+                    }}
+                  >
+                    Tag template
                   </button>
                 </td>
               </tr>
             );
           })}
-
           {filtered.length === 0 && (
             <tr>
-              <td className="px-2 py-4 text-center text-gray-500" colSpan={9}>
+              <td
+                colSpan={7}
+                className="px-2 py-4 text-center text-xs text-gray-500"
+              >
                 No documents match the current filters.
               </td>
             </tr>
@@ -595,10 +258,13 @@ function LibraryView({
   );
 }
 
+// ---------------- Pictorial view ----------------
+
 type PictorialViewProps = {
   documents: DocumentSummary[];
   filterProject: string;
   filterText: string;
+  selectedId: string | null;
   onSelect: (doc: DocumentSummary) => void;
   onTagTemplate: (doc: DocumentSummary) => void;
 };
@@ -607,98 +273,103 @@ function PictorialView({
   documents,
   filterProject,
   filterText,
+  selectedId,
   onSelect,
   onTagTemplate,
 }: PictorialViewProps) {
-  const filtered = useMemo(() => {
-    return documents.filter((doc) => {
-      if (filterProject && doc.projectOrEnquiry !== filterProject) {
-        return false;
-      }
-      if (
-        filterText &&
-        !doc.drawingOrDocNumber.toLowerCase().includes(filterText.toLowerCase())
-      ) {
-        return false;
-      }
-      return true;
-    });
-  }, [documents, filterProject, filterText]);
+  const filtered = useMemo(
+    () =>
+      documents.filter((doc) => {
+        if (filterProject && doc.projectOrEnquiry !== filterProject) return false;
+        if (
+          filterText &&
+          !doc.drawingOrDocNumber
+            .toLowerCase()
+            .includes(filterText.toLowerCase())
+        ) {
+          return false;
+        }
+        return true;
+      }),
+    [documents, filterProject, filterText]
+  );
 
   return (
-    <div className="p-4">
-      <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(220px,1fr))]">
+    <div className="flex-1 overflow-auto p-2">
+      {filtered.length === 0 && (
+        <div className="text-xs text-gray-500 text-center mt-4">
+          No documents match the current filters.
+        </div>
+      )}
+
+      <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         {filtered.map((doc) => {
-          const isAttention = doc.attentionCategory === 'needs_attention';
+          const isSelected = doc.id === selectedId;
           return (
             <div
               key={doc.id}
               className={
-                'border rounded overflow-hidden cursor-pointer flex flex-col ' +
-                (isAttention ? 'bg-yellow-50' : 'bg-white')
+                'border rounded shadow-sm bg-white cursor-pointer flex flex-col ' +
+                (isSelected ? 'ring-2 ring-blue-400' : '')
               }
               onClick={() => onSelect(doc)}
             >
-              <div className="aspect-[4/3] bg-gray-200 flex items-center justify-center text-xs text-gray-500">
+              <div className="bg-gray-100 border-b h-40 flex items-center justify-center overflow-hidden">
                 {doc.thumbnailUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={doc.thumbnailUrl}
                     alt={doc.title}
-                    className="w-full h-full object-cover"
+                    className="object-contain max-h-full"
                   />
                 ) : (
-                  <span>No preview</span>
+                  <span className="text-[11px] text-gray-500">
+                    No preview available
+                  </span>
                 )}
               </div>
-              <div className="p-2 flex flex-col gap-1">
-                <div className="text-xs text-gray-500">
+              <div className="p-2 space-y-1">
+                <div className="text-[11px] text-gray-500">
                   {doc.projectOrEnquiry}
                 </div>
-                <div className="text-sm font-semibold">
+                <div className="font-mono text-xs font-semibold">
                   {doc.drawingOrDocNumber}
+                  {doc.revision && (
+                    <span className="ml-1 text-[10px] text-gray-500">
+                      (Rev {doc.revision})
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-gray-700 line-clamp-2">
                   {doc.title}
                 </div>
                 <div className="flex items-center justify-between mt-1">
-                  <span className="text-xs text-gray-600">
-                    Rev {doc.revision ?? '-'}
-                  </span>
-                  <StatusChip status={doc.status} />
+                  <StatusBadge status={doc.status} />
+                  <button
+                    type="button"
+                    className="text-[11px] px-2 py-0.5 border rounded"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTagTemplate(doc);
+                    }}
+                  >
+                    Tag
+                  </button>
                 </div>
-                {doc.attentionCategory === 'needs_attention' && (
-                  <div className="mt-1">
-                    <button
-                      type="button"
-                      className="px-2 py-0.5 border rounded text-xs"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onTagTemplate(doc);
-                      }}
-                    >
-                      Tag template
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
           );
         })}
-
-        {filtered.length === 0 && (
-          <div className="text-center text-gray-500 text-sm col-span-full py-4">
-            No documents match the current filters.
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
+// ---------------- Project view ----------------
+
 type ProjectViewProps = {
   documents: DocumentSummary[];
   selectedProjectOrEnquiry: string;
+  selectedId: string | null;
   onSelect: (doc: DocumentSummary) => void;
   onTagTemplate: (doc: DocumentSummary) => void;
 };
@@ -706,13 +377,12 @@ type ProjectViewProps = {
 function ProjectView({
   documents,
   selectedProjectOrEnquiry,
+  selectedId,
   onSelect,
   onTagTemplate,
 }: ProjectViewProps) {
   const filtered = useMemo(() => {
-    if (!selectedProjectOrEnquiry) {
-      return [];
-    }
+    if (!selectedProjectOrEnquiry) return [];
     return documents.filter(
       (doc) => doc.projectOrEnquiry === selectedProjectOrEnquiry
     );
@@ -723,123 +393,140 @@ function ProjectView({
   );
   const clean = filtered.filter((doc) => doc.attentionCategory === 'clean');
 
-  return (
-    <div className="p-4 space-y-4">
-      {!selectedProjectOrEnquiry && (
-        <div className="text-sm text-gray-500">
-          Select a project or enquiry above to see its documents.
-        </div>
-      )}
-
-      {selectedProjectOrEnquiry && (
-        <>
-          <section>
-            <h2 className="font-semibold text-sm mb-2">
-              Needs attention ({needsAttention.length})
-            </h2>
-            <SimpleProjectTable
-              documents={needsAttention}
-              onSelect={onSelect}
-              onTagTemplate={onTagTemplate}
-              highlightAttention
-            />
-          </section>
-
-          <section>
-            <h2 className="font-semibold text-sm mb-2">
-              Clean ({clean.length})
-            </h2>
-            <SimpleProjectTable
-              documents={clean}
-              onSelect={onSelect}
-              onTagTemplate={onTagTemplate}
-            />
-          </section>
-        </>
-      )}
-    </div>
-  );
-}
-
-type SimpleProjectTableProps = {
-  documents: DocumentSummary[];
-  onSelect: (doc: DocumentSummary) => void;
-  onTagTemplate: (doc: DocumentSummary) => void;
-  highlightAttention?: boolean;
-};
-
-function SimpleProjectTable({
-  documents,
-  onSelect,
-  onTagTemplate,
-  highlightAttention,
-}: SimpleProjectTableProps) {
-  if (documents.length === 0) {
+  if (!selectedProjectOrEnquiry) {
     return (
-      <div className="border rounded px-3 py-2 text-sm text-gray-500">
-        None.
+      <div className="flex-1 flex items-center justify-center text-xs text-gray-500">
+        Select a project or enquiry from the dropdown above.
       </div>
     );
   }
 
   return (
-    <table className="w-full border-collapse text-sm">
-      <thead>
-        <tr className="border-b bg-gray-50">
-          <th className="text-left px-2 py-1">Drawing / Doc number</th>
-          <th className="text-left px-2 py-1">Title</th>
-          <th className="text-left px-2 py-1">Rev</th>
-          <th className="text-left px-2 py-1">Status</th>
-          <th className="text-left px-2 py-1">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {documents.map((doc) => (
-          <tr
-            key={doc.id}
-            className={
-              'border-b cursor-pointer hover:bg-gray-50 ' +
-              (highlightAttention ? 'bg-yellow-50' : '')
-            }
-            onClick={() => onSelect(doc)}
-          >
-            <td className="px-2 py-1 whitespace-nowrap">
-              {doc.drawingOrDocNumber}
-            </td>
-            <td className="px-2 py-1">{doc.title}</td>
-            <td className="px-2 py-1 whitespace-nowrap">
-              {doc.revision ?? '-'}
-            </td>
-            <td className="px-2 py-1 whitespace-nowrap">
-              <StatusChip status={doc.status} />
-            </td>
-            <td
-              className="px-2 py-1 whitespace-nowrap"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {highlightAttention && (
-                <button
-                  type="button"
-                  className="mr-2 px-2 py-0.5 border rounded text-xs"
-                  onClick={() => onTagTemplate(doc)}
-                >
-                  Tag
-                </button>
-              )}
-              <button
-                type="button"
-                className="px-2 py-0.5 border rounded text-xs"
-                onClick={() => onSelect(doc)}
-              >
-                Details
-              </button>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="flex-1 overflow-auto p-2 space-y-4">
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xs font-semibold text-red-600">
+            Items needing attention
+          </h3>
+          <span className="text-[11px] text-gray-500">
+            Unmatched, revision checks, errors, pending, etc.
+          </span>
+        </div>
+        <DocumentTable
+          documents={needsAttention}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          onTagTemplate={onTagTemplate}
+        />
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xs font-semibold text-green-700">
+            Clean / processed items
+          </h3>
+          <span className="text-[11px] text-gray-500">
+            Current, processed versions only.
+          </span>
+        </div>
+        <DocumentTable
+          documents={clean}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          onTagTemplate={onTagTemplate}
+        />
+      </div>
+    </div>
   );
 }
+
+type DocumentTableProps = {
+  documents: DocumentSummary[];
+  selectedId: string | null;
+  onSelect: (doc: DocumentSummary) => void;
+  onTagTemplate: (doc: DocumentSummary) => void;
+};
+
+function DocumentTable({
+  documents,
+  selectedId,
+  onSelect,
+  onTagTemplate,
+}: DocumentTableProps) {
+  if (documents.length === 0) {
+    return (
+      <div className="border rounded bg-gray-50 px-2 py-2 text-xs text-gray-500">
+        No documents in this bucket.
+      </div>
+    );
+  }
+
+  return (
+    <div className="border rounded overflow-hidden">
+      <table className="min-w-full text-xs border-collapse">
+        <thead className="bg-gray-50 border-b text-[11px] uppercase tracking-wide text-gray-600">
+          <tr>
+            <th className="text-left px-2 py-1 border-r">Number</th>
+            <th className="text-left px-2 py-1 border-r">Title</th>
+            <th className="text-left px-2 py-1 border-r">Rev</th>
+            <th className="text-left px-2 py-1 border-r">Status</th>
+            <th className="text-left px-2 py-1">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {documents.map((doc) => {
+            const isSelected = doc.id === selectedId;
+            return (
+              <tr
+                key={doc.id}
+                className={
+                  'border-b cursor-pointer ' +
+                  (isSelected ? 'bg-blue-100' : 'hover:bg-blue-50')
+                }
+                onClick={() => onSelect(doc)}
+              >
+                <td className="px-2 py-1 align-top font-mono">
+                  {doc.drawingOrDocNumber}
+                </td>
+                <td className="px-2 py-1 align-top">{doc.title}</td>
+                <td className="px-2 py-1 align-top">
+                  {doc.revision ?? '-'}
+                </td>
+                <td className="px-2 py-1 align-top">
+                  <StatusBadge status={doc.status} />
+                </td>
+                <td className="px-2 py-1 align-top">
+                  <button
+                    type="button"
+                    className="text-[11px] px-2 py-0.5 border rounded mr-2"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelect(doc);
+                    }}
+                  >
+                    Details
+                  </button>
+                  <button
+                    type="button"
+                    className="text-[11px] px-2 py-0.5 border rounded"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTagTemplate(doc);
+                    }}
+                  >
+                    Tag
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ---------------- Detail panel ----------------
 
 type DetailPanelProps = {
   document: DocumentSummary | null;
@@ -856,65 +543,88 @@ function DetailPanel({ document }: DetailPanelProps) {
 
   return (
     <div className="h-full flex flex-col">
+      {/* Header */}
       <div className="border-b px-3 py-2">
         <div className="text-xs text-gray-500">
           {document.projectOrEnquiry}
         </div>
         <div className="font-semibold text-sm">
-          {document.drawingOrDocNumber}
+          <span className="font-mono">{document.drawingOrDocNumber}</span>
+          {document.revision && (
+            <span className="ml-1 text-xs text-gray-500">
+              (Rev {document.revision})
+            </span>
+          )}
         </div>
         <div className="text-xs text-gray-700">{document.title}</div>
+      </div>
 
-        <div className="mt-2 flex flex-wrap gap-2 text-xs">
-          <span className="inline-flex items-center gap-1">
-            <span className="font-medium">Rev</span>{' '}
-            <span>{document.revision ?? '-'}</span>
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="font-medium">Pages</span>{' '}
+      {/* Meta + quick actions */}
+      <div className="px-3 py-2 border-b flex items-start justify-between gap-3">
+        <div className="space-y-1 text-xs">
+          <div>
+            <span className="text-gray-500 mr-1">Pages:</span>
             <span>{document.pages}</span>
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="font-medium">Size</span>{' '}
-            <span>{document.sizeLabel ?? '-'}</span>
-          </span>
-        </div>
-
-        <div className="mt-2 text-xs text-gray-600 space-y-1">
+          </div>
+          <div>
+            <span className="text-gray-500 mr-1">Status:</span>
+            <StatusBadge status={document.status} />
+          </div>
           {document.uploadDate && (
             <div>
-              <span className="font-medium">Uploaded:</span>{' '}
-              {document.uploadDate}
+              <span className="text-gray-500 mr-1">Uploaded:</span>
+              <span>{new Date(document.uploadDate).toLocaleString()}</span>
             </div>
           )}
           {document.originalFilename && (
             <div>
-              <span className="font-medium">File:</span>{' '}
-              {document.originalFilename}
+              <span className="text-gray-500 mr-1">File:</span>
+              <span>{document.originalFilename}</span>
             </div>
           )}
           {document.nasPath && (
             <div className="break-all">
-              <span className="font-medium">NAS:</span> {document.nasPath}
+              <span className="text-gray-500 mr-1">NAS path:</span>
+              <span>{document.nasPath}</span>
             </div>
           )}
-          {document.pdfUrl && (
-            <div>
-                <span className="font-medium">PDF:</span>{' '}
-                <a
-                href={document.pdfUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-blue-600 underline"
-                >
-                Open PDF
-                </a>
-            </div>
-            )}
+        </div>
 
+        <div className="flex flex-col gap-1 items-end">
+          {document.pdfUrl && (
+            <a
+              href={document.pdfUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs px-2 py-1 border rounded bg-white hover:bg-gray-50"
+            >
+              Open PDF
+            </a>
+          )}
         </div>
       </div>
 
+      {/* Inline preview box */}
+      {document.thumbnailUrl && (
+        <div className="px-3 py-2 border-b bg-gray-50 flex justify-center">
+          <button
+            type="button"
+            className="border rounded bg-white max-w-full max-h-64 overflow-hidden"
+            onClick={() => {
+              const target = document.pdfUrl ?? document.thumbnailUrl!;
+              window.open(target, '_blank');
+            }}
+          >
+            <img
+              src={document.thumbnailUrl}
+              alt={document.title}
+              className="max-h-64 max-w-full object-contain"
+            />
+          </button>
+        </div>
+      )}
+
+      {/* Version history */}
       <div className="flex-1 overflow-auto px-3 py-2">
         <h3 className="text-xs font-semibold mb-1">Version history</h3>
         {document.versionHistory && document.versionHistory.length > 0 ? (
@@ -924,79 +634,329 @@ function DetailPanel({ document }: DetailPanelProps) {
                 <span>
                   Rev {v.revision ?? '-'} ({v.status})
                 </span>
-                <span className="text-gray-500">{v.uploadDate}</span>
+                <span className="text-gray-500">
+                  {new Date(v.uploadDate).toLocaleString()}
+                </span>
               </li>
             ))}
           </ul>
         ) : (
-          <div className="text-xs text-gray-500">No history recorded.</div>
+          <div className="text-xs text-gray-500">
+            No version history found.
+          </div>
         )}
-      </div>
-
-      <div className="border-t px-3 py-2 flex gap-2 text-xs">
-        <button
-        type="button"
-        className="px-2 py-1 border rounded disabled:opacity-60"
-        disabled={!document.pdfUrl}
-        onClick={() => {
-            if (document.pdfUrl) {
-            window.open(document.pdfUrl, '_blank');
-            }
-        }}
-        >
-        Open preview
-        </button>
-        <button
-          type="button"
-          className="px-2 py-1 border rounded"
-          onClick={() => console.log('Open NAS for', document.nasPath)}
-        >
-          Open NAS folder
-        </button>
       </div>
     </div>
   );
 }
 
-type StatusChipProps = {
+// ---------------- Status badge ----------------
+
+type StatusBadgeProps = {
   status: DocumentStatus;
 };
 
-function StatusChip({ status }: StatusChipProps) {
-  let label = status;
+function StatusBadge({ status }: StatusBadgeProps) {
+  let label = '';
   let className =
-    'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] border ';
+    'inline-flex items-center px-2 py-0.5 rounded-full border text-[10px]';
 
   switch (status) {
     case 'clean':
-      label = 'Current';
-      className += 'bg-green-50 border-green-400 text-green-700';
+      label = 'Clean';
+      className += ' bg-green-50 border-green-500 text-green-700';
       break;
     case 'needs_attention':
       label = 'Needs attention';
-      className += 'bg-yellow-50 border-yellow-500 text-yellow-700';
+      className += ' bg-yellow-50 border-yellow-500 text-yellow-700';
       break;
     case 'unmatched':
       label = 'Unmatched';
-      className += 'bg-orange-50 border-orange-500 text-orange-700';
+      className += ' bg-orange-50 border-orange-500 text-orange-700';
       break;
     case 'revision_check':
       label = 'Revision check';
-      className += 'bg-blue-50 border-blue-500 text-blue-700';
+      className += ' bg-blue-50 border-blue-500 text-blue-700';
       break;
     case 'pending':
-      label = 'Processing';
-      className += 'bg-gray-50 border-gray-400 text-gray-700';
+      label = 'Pending';
+      className += ' bg-gray-50 border-gray-400 text-gray-700';
       break;
     case 'error':
       label = 'Error';
-      className += 'bg-red-50 border-red-500 text-red-700';
+      className += ' bg-red-50 border-red-500 text-red-700';
       break;
     default:
       label = 'Other';
-      className += 'bg-gray-50 border-gray-400 text-gray-700';
+      className += ' bg-gray-50 border-gray-400 text-gray-700';
       break;
   }
 
   return <span className={className}>{label}</span>;
+}
+
+// ---------------- Main dashboard page ----------------
+
+export default function DashboardPage() {
+  const [view, setView] = useState<ViewMode>('library');
+
+  const [documents, setDocuments] = useState<DocumentSummary[]>([]);
+  const [selectedDoc, setSelectedDoc] = useState<DocumentSummary | null>(null);
+
+  const [filterProject, setFilterProject] = useState('');
+  const [filterText, setFilterText] = useState('');
+
+  const [projectFilterForProjectsView, setProjectFilterForProjectsView] =
+    useState('');
+
+  // Load list of documents once; UI filters are client-side
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const res = await fetch('/api/documents');
+        if (!res.ok) {
+          console.error('Failed to fetch documents:', res.statusText);
+          return;
+        }
+        const body = (await res.json()) as { documents?: DocumentSummary[] };
+        if (cancelled) return;
+        const docs = body.documents ?? [];
+        setDocuments(docs);
+        if (docs.length > 0) {
+          setSelectedDoc(docs[0]);
+        }
+      } catch (err) {
+        console.error('Error fetching documents:', err);
+      }
+    }
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const projectOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const doc of documents) {
+      if (doc.projectOrEnquiry) {
+        set.add(doc.projectOrEnquiry);
+      }
+    }
+    return Array.from(set).sort();
+  }, [documents]);
+
+  const handleSelectDoc = useCallback((doc: DocumentSummary) => {
+    // Immediately show whatever we already know from the list
+    setSelectedDoc(doc);
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/documents/${doc.id}`);
+
+        if (!res.ok) {
+          // 404: treat as "no extra detail/history", don't spam console with errors
+          if (res.status === 404) {
+            console.warn(
+              'No extra detail/history found for document',
+              doc.id
+            );
+          } else {
+            console.error(
+              'Failed to fetch document detail:',
+              res.status,
+              res.statusText
+            );
+          }
+          return;
+        }
+
+        const body = (await res.json()) as {
+          document: DocumentSummary;
+          history: VersionInfo[];
+        };
+
+        // Only merge into the same doc that is still selected
+        setSelectedDoc((prev) => {
+          if (!prev || prev.id !== doc.id) return prev;
+          return {
+            ...prev,
+            ...body.document,
+            versionHistory: body.history,
+          };
+        });
+      } catch (err) {
+        console.error('Error fetching document detail:', err);
+      }
+    })();
+  }, []);
+
+  const handleTagTemplate = useCallback((doc: DocumentSummary) => {
+    // Placeholder: plug this into your template-tagging flow (e.g. /tagger?id=...)
+    console.log('Tag template for doc', doc.id);
+  }, []);
+
+  const handleUpload = useCallback(
+    async (
+      files: File[],
+      meta: { type: 'project' | 'enquiry'; value: string }
+    ) => {
+      console.log('Upload requested', { files, meta });
+      // TODO: wire this to your upload API / worker pipeline
+    },
+    []
+  );
+
+  const selectedId = selectedDoc?.id ?? null;
+
+  return (
+    <div className="h-screen flex flex-col">
+      {/* Top bar with view switch + upload */}
+      <header className="border-b px-4 py-2 flex items-center justify-between bg-white">
+        <div className="flex items-center gap-3">
+          <h1 className="text-sm font-semibold">Document dashboard</h1>
+          <div className="flex gap-1 text-[11px]">
+            <button
+              type="button"
+              className={`px-2 py-0.5 rounded border ${
+                view === 'library'
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-700'
+              }`}
+              onClick={() => setView('library')}
+            >
+              Library
+            </button>
+            <button
+              type="button"
+              className={`px-2 py-0.5 rounded border ${
+                view === 'pictorial'
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-700'
+              }`}
+              onClick={() => setView('pictorial')}
+            >
+              Pictorial
+            </button>
+            <button
+              type="button"
+              className={`px-2 py-0.5 rounded border ${
+                view === 'projects'
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-700'
+              }`}
+              onClick={() => setView('projects')}
+            >
+              Projects
+            </button>
+          </div>
+        </div>
+
+        <UploadBar onUpload={handleUpload} />
+      </header>
+
+      {/* Main content: left = view, right = details */}
+      <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-col flex-[3] border-r bg-gray-50">
+          {/* Filters bar */}
+          <div className="flex items-center gap-3 px-3 py-2 border-b bg-white">
+            {view !== 'projects' && (
+              <>
+                <div className="flex items-center gap-1">
+                  <label className="text-[11px] text-gray-600">
+                    Project / Enquiry
+                  </label>
+                  <select
+                    className="border rounded px-2 py-0.5 text-xs"
+                    value={filterProject}
+                    onChange={(e) => setFilterProject(e.target.value)}
+                  >
+                    <option value="">All</option>
+                    {projectOptions.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-1">
+                  <label className="text-[11px] text-gray-600">
+                    Drawing / doc #
+                  </label>
+                  <input
+                    className="border rounded px-2 py-0.5 text-xs"
+                    value={filterText}
+                    onChange={(e) => setFilterText(e.target.value)}
+                    placeholder="Filter by number"
+                  />
+                </div>
+              </>
+            )}
+
+            {view === 'projects' && (
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] text-gray-600">
+                  Project / Enquiry
+                </label>
+                <select
+                  className="border rounded px-2 py-0.5 text-xs"
+                  value={projectFilterForProjectsView}
+                  onChange={(e) =>
+                    setProjectFilterForProjectsView(e.target.value)
+                  }
+                >
+                  <option value="">Select…</option>
+                  {projectOptions.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* View content */}
+          {view === 'library' && (
+            <LibraryView
+              documents={documents}
+              filterProject={filterProject}
+              filterText={filterText}
+              selectedId={selectedId}
+              onSelect={handleSelectDoc}
+              onTagTemplate={handleTagTemplate}
+            />
+          )}
+
+          {view === 'pictorial' && (
+            <PictorialView
+              documents={documents}
+              filterProject={filterProject}
+              filterText={filterText}
+              selectedId={selectedId}
+              onSelect={handleSelectDoc}
+              onTagTemplate={handleTagTemplate}
+            />
+          )}
+
+          {view === 'projects' && (
+            <ProjectView
+              documents={documents}
+              selectedProjectOrEnquiry={projectFilterForProjectsView}
+              selectedId={selectedId}
+              onSelect={handleSelectDoc}
+              onTagTemplate={handleTagTemplate}
+            />
+          )}
+        </div>
+
+        <div className="flex flex-col flex-[2] bg-white">
+          <DetailPanel document={selectedDoc} />
+        </div>
+      </div>
+    </div>
+  );
 }
